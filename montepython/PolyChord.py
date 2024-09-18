@@ -356,6 +356,7 @@ def run(cosmo, data, command_line):
         for i, name in enumerate(data.PC_param_names):
             data.mcmc_parameters[name]['current'] = theta[i]
         data.update_cosmo_arguments()
+        data.update_astro_arguments()
 
         # Compute likelihood
         #logl = sampler.compute_lkl(cosmo, data)[0,0]

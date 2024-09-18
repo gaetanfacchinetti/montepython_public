@@ -1,0 +1,17 @@
+# Lyman-alpha likelihood based on the alpha-beta-gamma
+# approach described in 1704.07838 and 1806.08371.
+# Full likelihood described in detail in 1907.01496.
+# Likelihood written by M. Archidiacono, R. Murgia,
+# D.C. Hooper, J. Lesgourgues, and M. Viel.
+
+# This likelihood should always be used together with
+# a CMB likelihood (e.g. Planck).
+
+# Important! This likelihood requires CLASS version 2.9 or higher.
+
+
+# Data directory and bin file (for models that fail the checks)
+UVLuminosity.data_directory = os.path.join(data.path['data'], 'UVLuminosity/')
+UVLuminosity.kmax = 1000
+
+UVLuminosity.use_nuisance = []

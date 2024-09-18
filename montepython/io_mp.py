@@ -97,11 +97,13 @@ def log_cosmo_arguments(data, command_line):
     previously initialized data.
 
     """
-    if len(data.cosmo_arguments) >= 1:
+    dataset = (data.cosmo_arguments | data.astro_arguments)
+
+    if len(dataset) >= 1:
         log = open(os.path.join(command_line.folder, 'log.param'), 'a')
         log.write('\n\n#-----------Cosmological-arguments---------\n')
         log.write('data.cosmo_arguments.update({0})\n'.format(
-            data.cosmo_arguments))
+            dataset))
         log.close()
 
 

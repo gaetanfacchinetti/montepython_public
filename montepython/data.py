@@ -158,6 +158,9 @@ class Data(object):
 
         :rtype: ordereddict
         """
+        self.astro_arguments = {}
+        """
+        """
 
         # Arguments for PyMultiNest
         self.NS_param_names = []
@@ -609,7 +612,7 @@ class Data(object):
         """
         array = []
         # First obvious block is all cosmological parameters
-        array.append(len(self.get_mcmc_parameters(['varying', 'cosmo'])))
+        array.append(len(self.get_mcmc_parameters(['varying', 'cosmo'])) + len(self.get_mcmc_parameters(['varying', 'astro'])))
         # Then, store all nuisance parameters
         nuisance = self.get_mcmc_parameters(['varying', 'nuisance'])
 
@@ -781,6 +784,14 @@ class Data(object):
             else:
                 likelihood.need_update = False
 
+    def update_astro_arguments(self):
+        for elem in self.get_mcmc_parameters(['astro']):
+            # Fill in the dictionnary with the current value of parameters
+            self.astro_arguments[elem] = \
+                self.mcmc_parameters[elem]['current'] *\
+                self.mcmc_parameters[elem]['scale']
+        
+
     def update_cosmo_arguments(self):
         """
         Put in :attr:`cosmo_arguments` the current values of
@@ -815,7 +826,7 @@ class Data(object):
             self.cosmo_arguments[elem] = \
                 self.mcmc_parameters[elem]['current'] *\
                 self.mcmc_parameters[elem]['scale']
-
+            
         # For all elements in the cosmological arguments list iterate through
         # to see if any need to be updated. Normally not necessary, but this
         # allowes us to catch and edit parameters that aren't being varied
@@ -1360,6 +1371,7 @@ class Data(object):
 
         # Propagating this to the cosmo_arguments dictionary
         self.update_cosmo_arguments()
+        self.update_astro_arguments()
 
         # Store itself into the context
         ctx.add('data', self)

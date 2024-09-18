@@ -270,6 +270,7 @@ def run(cosmo, data, command_line):
             data.mcmc_parameters[name]['current'] = cube[i]
         # Propagate the information towards the cosmo arguments
         data.update_cosmo_arguments()
+        data.update_astro_arguments()
         lkl = sampler.compute_lkl(cosmo, data)
         for i, name in enumerate(derived_param_names):
             cube[ndim+i] = data.mcmc_parameters[name]['current']
