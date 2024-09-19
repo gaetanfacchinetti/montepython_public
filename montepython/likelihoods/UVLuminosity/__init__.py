@@ -37,8 +37,8 @@ class UVLuminosity(Likelihood):
     def get_k_max(self, data) -> (None | float):
         
     
-        # if these specific cosmological parameters are used, it speeds up the computation
-        # by allowing to define a smart k_max
+        # if these specific cosmological parameters are used, 
+        # it speeds up the computation by allowing to define a smart k_max
         if 'omega_b' not in data.mcmc_parameters:
             return self.kmax
             
@@ -84,11 +84,14 @@ class UVLuminosity(Likelihood):
                     min_mh = np.min(mh)
                     
         rhom0  = omega_m * nnero.CST_MSOL_MPC.rho_c_over_h2        
-        k_max = 11 * self.c * (3*min_mh/(4*np.pi)/rhom0)**(-1/3)
+        k_max = 1.1 * self.c * (3*min_mh/(4*np.pi)/rhom0)**(-1/3)
 
+        # one should (almost) never need self.kmax if large enough
+        # set here as a security to do not make CLASS take to much
+        # time and crash
         return np.min([k_max / h, self.kmax])
             
-
+            
 
     # start of the actual likelihood computation function
     def loglkl(self, cosmo, data):
