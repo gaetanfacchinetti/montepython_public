@@ -1,17 +1,23 @@
-# Lyman-alpha likelihood based on the alpha-beta-gamma
-# approach described in 1704.07838 and 1806.08371.
-# Full likelihood described in detail in 1907.01496.
-# Likelihood written by M. Archidiacono, R. Murgia,
-# D.C. Hooper, J. Lesgourgues, and M. Viel.
+# UV-Luminosity function likelihood
 
 # This likelihood should always be used together with
 # a CMB likelihood (e.g. Planck).
-
 # Important! This likelihood requires CLASS version 2.9 or higher.
-
 
 # Data directory and bin file (for models that fail the checks)
 UVLuminosity.data_directory = os.path.join(data.path['data'], 'UVLuminosity/')
+
+# maximum values of k (here in units of h/Mpc)
 UVLuminosity.kmax = 1000
+
+# halo mass function parameters
+# could be included as nuisance parameters in a future version
+UVLuminosity.sheth_a = 0.322
+UVLuminosity.sheth_q = 1.0
+UVLuminosity.sheth_p = 0.3 
+UVLuminosity.window  = 'sharpk'
+
+# radius to mass conversion factor
+UVLuminosity.c = 2.5
 
 UVLuminosity.use_nuisance = []

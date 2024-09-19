@@ -1270,6 +1270,13 @@ class Data(object):
                 for index in range(1, len(values)+1):
                     del self.cosmo_arguments[
                         original_name + '__%i' % index]
+        
+        # if we set the kmax according to the current valye of the arguments
+        if 'UVLuminosity' in self.lkl:
+            self.cosmo_arguments['P_k_max_h/Mpc'] = self.lkl['UVLuminosity'].get_k_max(self)
+ 
+
+
     @staticmethod
     def folder_is_initialised(folder):
         """
