@@ -13,6 +13,14 @@ import warnings
 import subprocess as sp
 import re
 
+NNERO_IMPORTED = False
+try:
+    import nnero
+    from nnero import Classifier, Regressor
+    NNERO_IMPORTED = True
+except:
+    pass
+
 import io_mp  # Needs to talk to io_mp.py file for the logging
                                # of parameters
 from io_mp import dictitems,dictvalues,dictkeys
@@ -60,7 +68,7 @@ class Data(object):
         On the other hand, these two following functions are called every step.
 
         * :func:`check_for_slow_step`
-        * :func:`update_cosmo_arguments`
+        * :func:`update_cosmo_astro_arguments`
 
         Finally, the convenient method :func:`get_mcmc_parameters` will be
         called in many places, to return the proper list of desired parameters.
@@ -158,7 +166,9 @@ class Data(object):
 
         :rtype: ordereddict
         """
+        # Added Gaetan
         self.astro_arguments = {}
+        self.options = {}
         """
         """
 
@@ -375,6 +385,13 @@ class Data(object):
 
         # Log plotting parameter names file for compatibility with GetDist
         io_mp.log_parameter_names(self, command_line)
+
+        # if NNERO is imported load default classifier and regressor
+        # just in case they are need afterwards
+        if NNERO_IMPORTED is True:
+            self.xHII_classifier : Classifier = Classifier.load()
+            self.xHII_regressor  : Regressor  = Regressor.load()
+
 
     def fill_mcmc_parameters(self):
         """
@@ -784,15 +801,9 @@ class Data(object):
             else:
                 likelihood.need_update = False
 
-    def update_astro_arguments(self):
-        for elem in self.get_mcmc_parameters(['astro']):
-            # Fill in the dictionnary with the current value of parameters
-            self.astro_arguments[elem] = \
-                self.mcmc_parameters[elem]['current'] *\
-                self.mcmc_parameters[elem]['scale']
         
 
-    def update_cosmo_arguments(self):
+    def update_cosmo_astro_arguments(self):
         """
         Put in :attr:`cosmo_arguments` the current values of
         :attr:`mcmc_parameters`
@@ -827,6 +838,32 @@ class Data(object):
                 self.mcmc_parameters[elem]['current'] *\
                 self.mcmc_parameters[elem]['scale']
             
+        for elem in self.get_mcmc_parameters(['astro']):
+            self.astro_arguments[elem] = \
+                self.mcmc_parameters[elem]['current'] *\
+                self.mcmc_parameters[elem]['scale']
+            
+        # set the kmax according to the current value of the arguments
+        # if that can help save some time for with some of the likelihood
+        if self.options.get('recompute_k_max', 'false') == 'true':
+            k_max = self.cosmo_arguments.get('P_k_max_h/Mpc', 1.0)
+            # check for the method get_k_max(data) for every likelihood
+            for lkl in self.lkl:
+                try:
+                    new_k_max = lkl.get_k_max(self)
+                    # update the k_max
+                    k_max = np.max([k_max, new_k_max])
+                except: pass
+            # update the cosmo arguments
+            self.cosmo_arguments['P_k_max_h/Mpc'] = k_max
+
+
+        input_config = self.options.get('input_config', 'planck_like')
+
+        # if the input_config
+        if input_config == 'astro':    
+            self.set_astro_config()
+            
         # For all elements in the cosmological arguments list iterate through
         # to see if any need to be updated. Normally not necessary, but this
         # allowes us to catch and edit parameters that aren't being varied
@@ -859,395 +896,402 @@ class Data(object):
         # translate any-one that is not directly a CLASS parameter into one.
         # The try: except: syntax ensures that the first call
         for elem in self.get_mcmc_parameters(['cosmo']):
-            # infer h from Omega_Lambda and delete Omega_Lambda
-            if elem == 'Omega_Lambda':
-                omega_b = self.cosmo_arguments['omega_b']
-                omega_cdm = self.cosmo_arguments['omega_cdm']
-                Omega_Lambda = self.cosmo_arguments['Omega_Lambda']
-                self.cosmo_arguments['h'] = math.sqrt(
-                    (omega_b+omega_cdm) / (1.-Omega_Lambda))
-                del self.cosmo_arguments[elem]
-            # infer omega_cdm from Omega_L and delete Omega_L
-            elif elem == 'Omega_L':
-                omega_b = self.cosmo_arguments['omega_b']
-                h = self.cosmo_arguments['h']
-                Omega_L = self.cosmo_arguments['Omega_L']
-                self.cosmo_arguments['omega_cdm'] = (1.-Omega_L)*h*h-omega_b
-                del self.cosmo_arguments[elem]
-            elif elem == 'ln10^{10}A_s':
-                self.cosmo_arguments['A_s'] = math.exp(
-                    self.cosmo_arguments[elem]) / 1.e10
-                del self.cosmo_arguments[elem]
-            elif elem == 'exp_m_2_tau_As':
-                tau_reio = self.cosmo_arguments['tau_reio']
-                self.cosmo_arguments['A_s'] = self.cosmo_arguments[elem] * \
-                    math.exp(2.*tau_reio)
-                del self.cosmo_arguments[elem]
-            elif elem == 'f_cdi':
-                self.cosmo_arguments['n_cdi'] = self.cosmo_arguments['n_s']
-            elif elem == 'beta':
-                self.cosmo_arguments['alpha'] = 2.*self.cosmo_arguments['beta']
-            elif elem == 'M_tot_NH' or elem == 'M_nu_NH' or elem == 'Mnu_NH' or elem == '{\sum}m_nu_NH' or elem == '{\sum}mnu_NH':
-                # By T. Brinckmann
-                # Normal hierarchy massive neutrinos. Calculates the individual
-                # neutrino masses from M_tot_NH and deletes M_tot_NH
-                if not self.cosmo_arguments['N_ncdm'] == 3:
-                    raise ValueError(
-                        "N_ncdm is not equal to 3."
-                        " This value should be exactly 3.")
-                # From Esteban et al. 2016: https://arxiv.org/abs/1611.01514
-                delta_m_squared_atm=2.524e-3 #2.45e-3
-                delta_m_squared_sol=7.50e-5 #7.50e-5
-                #m1_func = lambda m1, M_tot, d_m_sq_atm, d_m_sq_sol: M_tot**2. + 0.5*d_m_sq_sol - d_m_sq_atm + m1**2. - 2.*M_tot*m1 - 2.*M_tot*(d_m_sq_sol+m1**2.)**0.5 + 2.*m1*(d_m_sq_sol+m1**2.)**0.5
-                m1_func = lambda m1, M_tot, d_m_sq_atm, d_m_sq_sol: M_tot - m1 - (d_m_sq_sol + m1**2.)**0.5 - (d_m_sq_atm + m1**2.)**0.5
-                m1,opt_output,success,output_message = fsolve(m1_func,self.cosmo_arguments[elem]/3.,(self.cosmo_arguments[elem],delta_m_squared_atm,delta_m_squared_sol),full_output=True)
-                if not success == 1:
-                    raise ValueError(
-                        "Failed to estimate m1. Reason: "+output_message+
-                        " Exiting run.")
-                m1 = m1[0]
-                m2 = (delta_m_squared_sol + m1**2.)**0.5
-                #m3 = (delta_m_squared_atm + 0.5*(m2**2. + m1**2.))**0.5
-                m3 = (delta_m_squared_atm + m1**2.)**0.5
-                if m1+m2+m3 > self.cosmo_arguments[elem]+0.001*self.cosmo_arguments[elem]:
-                    raise ValueError(
-                        "Failed to estimate m1 resulting in sum(m_i) > M_tot."
-                        " Exiting run.")
-                self.cosmo_arguments['m_ncdm'] = r'%g, %g, %g' % (m1,m2,m3)
-                del self.cosmo_arguments[elem]
-            elif elem == 'M_tot_IH' or elem == 'M_nu_IH' or elem == 'Mnu_IH' or elem == '{\sum}m_nu_IH' or elem == '{\sum}mnu_IH':
-                # By T. Brinckmann
-                # Inverted hierarchy massive neutrinos. Calculates the individual
-                # neutrino masses from M_tot_IH and deletes M_tot_IH
-                if not self.cosmo_arguments['N_ncdm'] == 3:
-                    raise ValueError(
-                        "N_ncdm is not equal to 3."
-                        " This value should be exactly 3.")
-                # From Esteban et al. 2016: https://arxiv.org/abs/1611.01514
-                delta_m_squared_atm=-2.514e-3 #-2.45e-3
-                delta_m_squared_sol=7.50e-5 #7.50e-5
-                #m1_func = lambda m1, M_tot, d_m_sq_atm, d_m_sq_sol: M_tot**2. + 0.5*d_m_sq_sol - d_m_sq_atm + m1**2. - 2.*M_tot*m1 - 2.*M_tot*(d_m_sq_sol+m1**2.)**0.5 + 2.*m1*(d_m_sq_sol+m1**2.)**0.5
-                m1_func = lambda m1, M_tot, d_m_sq_atm, d_m_sq_sol: M_tot - m1 - (d_m_sq_sol + m1**2.)**0.5 - (abs(d_m_sq_atm + d_m_sq_sol + m1**2.))**0.5
-                m1,opt_output,success,output_message = fsolve(m1_func,self.cosmo_arguments[elem]/2.,(self.cosmo_arguments[elem],delta_m_squared_atm,delta_m_squared_sol),full_output=True)
-                if not success == 1:
-                    raise ValueError(
-                        "Failed to estimate m1. Reason: "+output_message+
-                        " Exiting run.")
-                m1 = m1[0]
-                m2 = (delta_m_squared_sol + m1**2.)**0.5
-                #m3 = (delta_m_squared_atm + 0.5*(m2**2. + m1**2.))**0.5
-                m3 = (delta_m_squared_atm + m2**2.)**0.5
-                if m1+m2+m3 > self.cosmo_arguments[elem]+0.001*self.cosmo_arguments[elem]:
-                    raise ValueError(
-                        "Failed to estimate m1 resulting in sum(m_i) > M_tot."
-                        "Exiting run.")
-                if delta_m_squared_atm + delta_m_squared_sol + m1**2. < 0.:
-                    raise ValueError(
-                        "Failed to correctly estimate m1. Found m1^2 = %f < %f,"
-                        "but m1^2 should always be greater than this value." % (m1**2.,- delta_m_squared_sol - delta_m_squared_atm))
-                self.cosmo_arguments['m_ncdm'] = r'%g, %g, %g' % (m1,m2,m3)
-                del self.cosmo_arguments[elem]
-            elif elem == 'M_tot' or elem == 'M_nu' or elem == 'Mnu' or elem == '{\sum}m_nu' or elem == '{\sum}mnu':
-                # By T. Brinckmann
-                # Massive neutrinos with identical non-zero mass. Calculates the
-                # individual neutrino masses from M_tot and deletes M_tot
-                if not self.cosmo_arguments['N_ncdm'] == 1:
-                    raise ValueError(
-                        "N_ncdm is not equal to 1."
-                        " This value should be exactly 1.")
-                self.cosmo_arguments['m_ncdm'] = self.cosmo_arguments[elem]/self.cosmo_arguments['deg_ncdm']
-                del self.cosmo_arguments[elem]
-            elif elem == 'm_s_eff':
-                # By T. Brinckmann
-                # conversion from effective sterile neutrino mass to physical sterile neutrino mass, assuming that this
-                # is the ncdm species number 2 and that it is Dodelson-Widrow like (i.e same temperature as active neutrinos)
-                #print self.cosmo_arguments
-                #self.cosmo_arguments['m_ncdm__2'] = self.cosmo_arguments['deg_ncdm__2']*self.cosmo_arguments[elem]
-                m_s_eff = self.cosmo_arguments[elem]/self.cosmo_arguments['deg_ncdm__2']
-                self.cosmo_arguments['m_ncdm'] = r'%g, %g' % (float(self.cosmo_arguments['m_ncdm']), m_s_eff)
-                del self.cosmo_arguments[elem]
-            # infer omega_cdm from omega_m, omega_b and omega_nu (omega_nu = sum(m_nu) / 93.14)
-            # [NS] moved after the determination of self.cosmo_arguments['m_ncdm']
-            # TB: generalized to arbitrary number of massive species and more parameter names
-            # applied MCMC parameter scaling only for small omega parameters, betting no one rescales the rest
-            elif elem == 'omega_m':
-                # MCMC parameter scaling for omega_m, if relevant
-                scale = 1.
-                if 'omega_m' in self.mcmc_parameters:
-                    scale = self.mcmc_parameters['omega_m']['scale']
-                omega_m = self.cosmo_arguments['omega_m'] * scale
+            # if the input looks like a planck input file
+            if input_config == 'planck_like':
+                # infer h from Omega_Lambda and delete Omega_Lambda
+                if elem == 'Omega_Lambda':
+                    omega_b = self.cosmo_arguments['omega_b']
+                    omega_cdm = self.cosmo_arguments['omega_cdm']
+                    Omega_Lambda = self.cosmo_arguments['Omega_Lambda']
+                    self.cosmo_arguments['h'] = math.sqrt(
+                        (omega_b+omega_cdm) / (1.-Omega_Lambda))
+                    del self.cosmo_arguments[elem]
+                # infer omega_cdm from Omega_L and delete Omega_L
+                elif elem == 'Omega_L':
+                    omega_b = self.cosmo_arguments['omega_b']
+                    h = self.cosmo_arguments['h']
+                    Omega_L = self.cosmo_arguments['Omega_L']
+                    self.cosmo_arguments['omega_cdm'] = (1.-Omega_L)*h*h-omega_b
+                    del self.cosmo_arguments[elem]
+                elif elem == 'ln10^{10}A_s':
+                    self.cosmo_arguments['A_s'] = math.exp(
+                        self.cosmo_arguments[elem]) / 1.e10
+                    del self.cosmo_arguments[elem]
+                elif elem == 'exp_m_2_tau_As':
+                    tau_reio = self.cosmo_arguments['tau_reio']
+                    self.cosmo_arguments['A_s'] = self.cosmo_arguments[elem] * \
+                        math.exp(2.*tau_reio)
+                    del self.cosmo_arguments[elem]
+                elif elem == 'f_cdi':
+                    self.cosmo_arguments['n_cdi'] = self.cosmo_arguments['n_s']
+                elif elem == 'beta':
+                    self.cosmo_arguments['alpha'] = 2.*self.cosmo_arguments['beta']
+                elif elem == 'M_tot_NH' or elem == 'M_nu_NH' or elem == 'Mnu_NH' or elem == '{\sum}m_nu_NH' or elem == '{\sum}mnu_NH':
+                    # By T. Brinckmann
+                    # Normal hierarchy massive neutrinos. Calculates the individual
+                    # neutrino masses from M_tot_NH and deletes M_tot_NH
+                    if not self.cosmo_arguments['N_ncdm'] == 3:
+                        raise ValueError(
+                            "N_ncdm is not equal to 3."
+                            " This value should be exactly 3.")
+                    # From Esteban et al. 2016: https://arxiv.org/abs/1611.01514
+                    delta_m_squared_atm=2.524e-3 #2.45e-3
+                    delta_m_squared_sol=7.50e-5 #7.50e-5
+                    #m1_func = lambda m1, M_tot, d_m_sq_atm, d_m_sq_sol: M_tot**2. + 0.5*d_m_sq_sol - d_m_sq_atm + m1**2. - 2.*M_tot*m1 - 2.*M_tot*(d_m_sq_sol+m1**2.)**0.5 + 2.*m1*(d_m_sq_sol+m1**2.)**0.5
+                    m1_func = lambda m1, M_tot, d_m_sq_atm, d_m_sq_sol: M_tot - m1 - (d_m_sq_sol + m1**2.)**0.5 - (d_m_sq_atm + m1**2.)**0.5
+                    m1,opt_output,success,output_message = fsolve(m1_func,self.cosmo_arguments[elem]/3.,(self.cosmo_arguments[elem],delta_m_squared_atm,delta_m_squared_sol),full_output=True)
+                    if not success == 1:
+                        raise ValueError(
+                            "Failed to estimate m1. Reason: "+output_message+
+                            " Exiting run.")
+                    m1 = m1[0]
+                    m2 = (delta_m_squared_sol + m1**2.)**0.5
+                    #m3 = (delta_m_squared_atm + 0.5*(m2**2. + m1**2.))**0.5
+                    m3 = (delta_m_squared_atm + m1**2.)**0.5
+                    if m1+m2+m3 > self.cosmo_arguments[elem]+0.001*self.cosmo_arguments[elem]:
+                        raise ValueError(
+                            "Failed to estimate m1 resulting in sum(m_i) > M_tot."
+                            " Exiting run.")
+                    self.cosmo_arguments['m_ncdm'] = r'%g, %g, %g' % (m1,m2,m3)
+                    del self.cosmo_arguments[elem]
+                elif elem == 'M_tot_IH' or elem == 'M_nu_IH' or elem == 'Mnu_IH' or elem == '{\sum}m_nu_IH' or elem == '{\sum}mnu_IH':
+                    # By T. Brinckmann
+                    # Inverted hierarchy massive neutrinos. Calculates the individual
+                    # neutrino masses from M_tot_IH and deletes M_tot_IH
+                    if not self.cosmo_arguments['N_ncdm'] == 3:
+                        raise ValueError(
+                            "N_ncdm is not equal to 3."
+                            " This value should be exactly 3.")
+                    # From Esteban et al. 2016: https://arxiv.org/abs/1611.01514
+                    delta_m_squared_atm=-2.514e-3 #-2.45e-3
+                    delta_m_squared_sol=7.50e-5 #7.50e-5
+                    #m1_func = lambda m1, M_tot, d_m_sq_atm, d_m_sq_sol: M_tot**2. + 0.5*d_m_sq_sol - d_m_sq_atm + m1**2. - 2.*M_tot*m1 - 2.*M_tot*(d_m_sq_sol+m1**2.)**0.5 + 2.*m1*(d_m_sq_sol+m1**2.)**0.5
+                    m1_func = lambda m1, M_tot, d_m_sq_atm, d_m_sq_sol: M_tot - m1 - (d_m_sq_sol + m1**2.)**0.5 - (abs(d_m_sq_atm + d_m_sq_sol + m1**2.))**0.5
+                    m1,opt_output,success,output_message = fsolve(m1_func,self.cosmo_arguments[elem]/2.,(self.cosmo_arguments[elem],delta_m_squared_atm,delta_m_squared_sol),full_output=True)
+                    if not success == 1:
+                        raise ValueError(
+                            "Failed to estimate m1. Reason: "+output_message+
+                            " Exiting run.")
+                    m1 = m1[0]
+                    m2 = (delta_m_squared_sol + m1**2.)**0.5
+                    #m3 = (delta_m_squared_atm + 0.5*(m2**2. + m1**2.))**0.5
+                    m3 = (delta_m_squared_atm + m2**2.)**0.5
+                    if m1+m2+m3 > self.cosmo_arguments[elem]+0.001*self.cosmo_arguments[elem]:
+                        raise ValueError(
+                            "Failed to estimate m1 resulting in sum(m_i) > M_tot."
+                            "Exiting run.")
+                    if delta_m_squared_atm + delta_m_squared_sol + m1**2. < 0.:
+                        raise ValueError(
+                            "Failed to correctly estimate m1. Found m1^2 = %f < %f,"
+                            "but m1^2 should always be greater than this value." % (m1**2.,- delta_m_squared_sol - delta_m_squared_atm))
+                    self.cosmo_arguments['m_ncdm'] = r'%g, %g, %g' % (m1,m2,m3)
+                    del self.cosmo_arguments[elem]
+                elif elem == 'M_tot' or elem == 'M_nu' or elem == 'Mnu' or elem == '{\sum}m_nu' or elem == '{\sum}mnu':
+                    # By T. Brinckmann
+                    # Massive neutrinos with identical non-zero mass. Calculates the
+                    # individual neutrino masses from M_tot and deletes M_tot
+                    if not self.cosmo_arguments['N_ncdm'] == 1:
+                        raise ValueError(
+                            "N_ncdm is not equal to 1."
+                            " This value should be exactly 1.")
+                    self.cosmo_arguments['m_ncdm'] = self.cosmo_arguments[elem]/self.cosmo_arguments['deg_ncdm']
+                    del self.cosmo_arguments[elem]
+                elif elem == 'm_s_eff':
+                    # By T. Brinckmann
+                    # conversion from effective sterile neutrino mass to physical sterile neutrino mass, assuming that this
+                    # is the ncdm species number 2 and that it is Dodelson-Widrow like (i.e same temperature as active neutrinos)
+                    #print self.cosmo_arguments
+                    #self.cosmo_arguments['m_ncdm__2'] = self.cosmo_arguments['deg_ncdm__2']*self.cosmo_arguments[elem]
+                    m_s_eff = self.cosmo_arguments[elem]/self.cosmo_arguments['deg_ncdm__2']
+                    self.cosmo_arguments['m_ncdm'] = r'%g, %g' % (float(self.cosmo_arguments['m_ncdm']), m_s_eff)
+                    del self.cosmo_arguments[elem]
+                # infer omega_cdm from omega_m, omega_b and omega_nu (omega_nu = sum(m_nu) / 93.14)
+                # [NS] moved after the determination of self.cosmo_arguments['m_ncdm']
+                # TB: generalized to arbitrary number of massive species and more parameter names
+                # applied MCMC parameter scaling only for small omega parameters, betting no one rescales the rest
+                elif elem == 'omega_m':
+                    # MCMC parameter scaling for omega_m, if relevant
+                    #scale = 1.
+                    #if 'omega_m' in self.mcmc_parameters:
+                    #    scale = self.mcmc_parameters['omega_m']['scale']
+                    omega_m = self.cosmo_arguments['omega_m'] #* scale 
+                    # added 02/10/2024 scale already included in cosmo_arguments
 
-                # Check for massive neutrinos and compute omega_nu if relevant
-                if 'N_ncdm' in self.cosmo_arguments and self.cosmo_arguments['N_ncdm']>0:
-                    if 'omega_ncdm' in self.cosmo_arguments:
-                        # MCMC parameter scaling for omega_nu, if relevant
-                        scale = 1.
-                        if 'omega_ncdm' in self.mcmc_parameters:
-                            scale = self.mcmc_parameters['omega_ncdm']['scale']
-                        omega_nu = self.cosmo_arguments['omega_ncdm'] * scale
-                    elif 'Omega_ncdm' in self.cosmo_arguments:
-                        # We need h to go from Omega_nu to omega_nu, return error if not provided
-                        if 'h' in self.cosmo_arguments:
-                            omega_nu = self.cosmo_arguments['Omega_ncdm']*self.cosmo_arguments['h']**2
-                        elif 'H0' in self.cosmo_arguments:
-                            omega_nu = self.cosmo_arguments['Omega_ncdm']*(self.cosmo_arguments['H0']/100.)**2
-                        else:
-                            raise io_mp.ConfigurationError("Provided Omega_ncdm, but could not find h directy,",
-                                                           "since neither of {h,H0} are defined")
-                    elif 'M_tot' in self.cosmo_arguments:
-                        omega_nu = self.cosmo_arguments['M_tot'] / 93.14
-                    elif 'M_nu' in self.cosmo_arguments:
-                        omega_nu = self.cosmo_arguments['M_nu'] / 93.14
-                    elif 'Mnu' in self.cosmo_arguments:
-                        omega_nu = self.cosmo_arguments['Mnu'] / 93.14
-                    elif '{\sum}m_nu' in self.cosmo_arguments:
-                        omega_nu = self.cosmo_arguments['{\sum}m_nu'] / 93.14
-                    elif '{\sum}mnu' in self.cosmo_arguments:
-                        omega_nu = self.cosmo_arguments['{\sum}mnu'] / 93.14
-                    elif 'm_ncdm' in self.cosmo_arguments:
-                        # Check number of massive neutrinos, assume 1 (CLASS default) if not specified
-                        if 'deg_ncdm' in self.cosmo_arguments:
-                            if type(self.cosmo_arguments['deg_ncdm']) == str:
-                                deg_ncdm = np.array(self.cosmo_arguments['deg_ncdm'].split(','), dtype='float')
-                            else:
-                                deg_ncdm = np.array(float(self.cosmo_arguments['deg_ncdm']))
-                        else:
-                            deg_ncdm = np.array(1.)
-
-                        # Compute neutrino mass sum based on number of massive neutrinos
-                        if type(self.cosmo_arguments['m_ncdm']) == str:
-                            m_ncdm = np.array(self.cosmo_arguments['m_ncdm'].split(','), dtype='float')
-                        else:
-                            m_ncdm = np.array(float(self.cosmo_arguments['m_ncdm']))
-                        omega_nu = np.dot(deg_ncdm,m_ncdm) / 93.14
-                    else:
-                        raise io_mp.ConfigurationError("N_ncdm is greater than 0, but couldn't identify any of",
-                                                       "{m_ncdm,omega_ncdm,Omega_ncdm,M_tot,M_nu,Mnu,{\sum}m_nu,{\sum}mnu}")
-                else:
-                    omega_nu = 0.
-
-                # Check for omega_b or Omega_b, return error if not provided
-                if 'omega_b' in self.cosmo_arguments:
-                    # MCMC parameter scaling for omega_b, if relevant
-                    scale = 1.
-                    if 'omega_b' in self.mcmc_parameters:
-                        scale = self.mcmc_parameters['omega_b']['scale']
-                    omega_b = self.cosmo_arguments['omega_b'] * scale
-                elif 'Omega_b' in self.cosmo_arguments:
-                    # We need h to go from Omega_b to omega_b, return error if not provided
-                    if 'h' in self.cosmo_arguments:
-                        omega_b = self.cosmo_arguments['Omega_b']*self.cosmo_arguments['h']**2
-                    elif 'H0' in self.cosmo_arguments:
-                        omega_b = self.cosmo_arguments['Omega_b']*(self.cosmo_arguments['H0']/100.)**2
-                    else:
-                        raise io_mp.ConfigurationError("Could not find h directy, since neither of {h,H0} are defined")
-                else:
-                    raise io_mp.ConfigurationError("Could not indentify any of {omega_b,Omega_b} for the definition of omega_m")
-
-                # If you have additional massive dark species they should be included below
-                del self.cosmo_arguments[elem]
-            # Same as for 'omega_m', just with 'Omega_m' instead
-            elif elem == 'Omega_m':
-                Omega_m = self.cosmo_arguments['Omega_m']
-
-                # Check for massive neutrinos and compute omega_nu if relevant
-                if 'N_ncdm' in self.cosmo_arguments and self.cosmo_arguments['N_ncdm']>0:
-                    if 'Omega_ncdm' in self.cosmo_arguments:
-                        Omega_nu = self.cosmo_arguments['Omega_ncdm']
-                    elif 'omega_ncdm' in self.cosmo_arguments:
-                        # MCMC parameter scaling for omega_ncdm, if relevant
-                        scale = 1.
-                        if 'omega_ncdm' in self.mcmc_parameters:
-                            scale = self.mcmc_parameters['omega_ncdm']['scale']
-                        omega_nu = self.cosmo_arguments['omega_ncdm'] * scale
-                    elif 'M_tot' in self.cosmo_arguments:
-                        omega_nu = self.cosmo_arguments['M_tot'] / 93.14
-                    elif 'M_nu' in self.cosmo_arguments:
-                        omega_nu = self.cosmo_arguments['M_nu'] / 93.14
-                    elif 'Mnu' in self.cosmo_arguments:
-                        omega_nu = self.cosmo_arguments['Mnu'] / 93.14
-                    elif '{\sum}m_nu' in self.cosmo_arguments:
-                        omega_nu = self.cosmo_arguments['{\sum}m_nu'] / 93.14
-                    elif '{\sum}mnu' in self.cosmo_arguments:
-                        omega_nu = self.cosmo_arguments['{\sum}mnu'] / 93.14
-                    elif 'm_ncdm' in self.cosmo_arguments:
-                        # Check number of massive neutrinos, assume 1 (CLASS default) if not specified
-                        if 'deg_ncdm' in self.cosmo_arguments:
-                            if type(self.cosmo_arguments['deg_ncdm']) == str:
-                                deg_ncdm = np.array(self.cosmo_arguments['deg_ncdm'].split(','), dtype='float')
-                            else:
-                                deg_ncdm = np.array(float(self.cosmo_arguments['deg_ncdm']))
-                        else:
-                            deg_ncdm = np.array(1.)
-
-                        # Compute neutrino mass sum based on number of massive neutrinos
-                        if type(self.cosmo_arguments['m_ncdm']) == str:
-                            m_ncdm = np.array(self.cosmo_arguments['m_ncdm'].split(','), dtype='float')
-                        else:
-                            m_ncdm = np.array(float(self.cosmo_arguments['m_ncdm']))
-                        omega_nu = np.dot(deg_ncdm,m_ncdm) / 93.14
-                    else:
-                        raise io_mp.ConfigurationError("N_ncdm is greater than 0, but couldn't identify any of",
-                                                       "{m_ncdm,omega_ncdm,Omega_ncdm,M_tot,M_nu,Mnu,{\sum}m_nu,{\sum}mnu}")
-                    # We need h to go from omega_nu to Omega_nu if the former was computed, return error if not provided
-                    try:
-                        if omega_nu:
+                    # Check for massive neutrinos and compute omega_nu if relevant
+                    if 'N_ncdm' in self.cosmo_arguments and self.cosmo_arguments['N_ncdm']>0:
+                        if 'omega_ncdm' in self.cosmo_arguments:
+                            # MCMC parameter scaling for omega_nu, if relevant
+                            #scale = 1.
+                            #if 'omega_ncdm' in self.mcmc_parameters:
+                            #    scale = self.mcmc_parameters['omega_ncdm']['scale']
+                            omega_nu = self.cosmo_arguments['omega_ncdm'] #* scale
+                            # added 02/10/2024 scale already included in cosmo_arguments
+                        elif 'Omega_ncdm' in self.cosmo_arguments:
+                            # We need h to go from Omega_nu to omega_nu, return error if not provided
                             if 'h' in self.cosmo_arguments:
-                                Omega_nu = omega_nu / self.cosmo_arguments['h']**2
+                                omega_nu = self.cosmo_arguments['Omega_ncdm']*self.cosmo_arguments['h']**2
                             elif 'H0' in self.cosmo_arguments:
-                                Omega_nu = omega_nu / (self.cosmo_arguments['H0']/100.)**2
+                                omega_nu = self.cosmo_arguments['Omega_ncdm']*(self.cosmo_arguments['H0']/100.)**2
                             else:
                                 raise io_mp.ConfigurationError("Provided Omega_ncdm, but could not find h directy,",
-                                                               "since neither of {h,H0} are defined")
-                    except NameError:
-                        pass
-                else:
-                    Omega_nu = 0.
+                                                            "since neither of {h,H0} are defined")
+                        elif 'M_tot' in self.cosmo_arguments:
+                            omega_nu = self.cosmo_arguments['M_tot'] / 93.14
+                        elif 'M_nu' in self.cosmo_arguments:
+                            omega_nu = self.cosmo_arguments['M_nu'] / 93.14
+                        elif 'Mnu' in self.cosmo_arguments:
+                            omega_nu = self.cosmo_arguments['Mnu'] / 93.14
+                        elif '{\sum}m_nu' in self.cosmo_arguments:
+                            omega_nu = self.cosmo_arguments['{\sum}m_nu'] / 93.14
+                        elif '{\sum}mnu' in self.cosmo_arguments:
+                            omega_nu = self.cosmo_arguments['{\sum}mnu'] / 93.14
+                        elif 'm_ncdm' in self.cosmo_arguments:
+                            # Check number of massive neutrinos, assume 1 (CLASS default) if not specified
+                            if 'deg_ncdm' in self.cosmo_arguments:
+                                if type(self.cosmo_arguments['deg_ncdm']) == str:
+                                    deg_ncdm = np.array(self.cosmo_arguments['deg_ncdm'].split(','), dtype='float')
+                                else:
+                                    deg_ncdm = np.array(float(self.cosmo_arguments['deg_ncdm']))
+                            else:
+                                deg_ncdm = np.array(1.)
 
-                # Check for omega_b or Omega_b, return error if not provided
-                if 'Omega_b' in self.cosmo_arguments:
-                    Omega_b = self.cosmo_arguments['Omega_b']
-                elif 'omega_b' in self.cosmo_arguments:
-                    # MCMC parameter scaling for omega_b, if relevant
-                    scale = 1.
-                    if 'omega_b' in self.mcmc_parameters:
-                        scale = self.mcmc_parameters['omega_b']['scale']
-                    # We need h to go from omega_b to Omega_b, return error if not provided
-                    if "h" in self.cosmo_arguments:
-                        Omega_b = (self.cosmo_arguments['omega_b'] * scale)/self.cosmo_arguments['h']**2
-                    elif "H0" in self.cosmo_arguments:
-                        Omega_b = (self.cosmo_arguments['omega_b'] * scale)/(self.cosmo_arguments['H0']/100.)**2
-                    else:
-                        raise io_mp.ConfigurationError("Could not find h directy, since neither of {h,H0} are defined")
-                else:
-                    raise io_mp.ConfigurationError("Could not indentify any of {omega_b,Omega_b} for the definition of Omega_m")
-
-                # If you have additional massive dark species they should be included below
-                self.cosmo_arguments['Omega_cdm'] = Omega_m - Omega_b - Omega_nu
-                del self.cosmo_arguments[elem]
-            elif elem == 'log10N_dg':
-                self.cosmo_arguments['N_dg'] = 10**(self.cosmo_arguments[elem])
-                del self.cosmo_arguments[elem]
-            elif elem == 'log10fn':
-                self.cosmo_arguments['f_nadm'] = 10**(self.cosmo_arguments[elem])
-                del self.cosmo_arguments[elem]
-            elif elem == 'log10Gamma':
-                self.cosmo_arguments['invtau0_nadm_dg'] = 10**(self.cosmo_arguments[elem])
-                del self.cosmo_arguments[elem]
-            elif elem == 'w0wa':
-                self.cosmo_arguments['wa_fld'] = self.cosmo_arguments[elem] - self.cosmo_arguments['w0_fld']
-                del self.cosmo_arguments[elem]
-            elif elem == 'N_eff_camb':
-                #self.cosmo_arguments['N_ur'] = 2./3.*self.cosmo_arguments[elem]
-                N_eff_fid = 3.044
-                self.cosmo_arguments['N_ur'] = self.cosmo_arguments[elem] - N_eff_fid/3.
-                del self.cosmo_arguments[elem]
-            elif elem == 'm_nu_camb':
-                N_eff_fid = 3.044
-                #print ("Treat m_nu_camb")
-                #if "N_eff_camb" in self.cosmo_arguments:
-                #    gfact = self.cosmo_arguments['N_eff_camb']/3.
-                #elif "N_ur" in self.cosmo_arguments:
-                #    gfact = self.cosmo_arguments['N_ur']/2.
-                #else:
-                #    raise ValueError("Could not find Omega_ncdm because N_eff_camb and N_ur both undefined")
-                gfact =N_eff_fid/3.
-
-                self.cosmo_arguments['T_ncdm'] = pow(4./11.,1./3.)*pow(gfact,1./4.)
-                if "h" in self.cosmo_arguments:
-                    h = float(self.cosmo_arguments['h'])
-                elif "H0" in self.cosmo_arguments:
-                    h = float(self.cosmo_arguments['H0'])/100
-
-                m_nu_camb = float(self.cosmo_arguments['m_nu_camb'])
-                self.cosmo_arguments['Omega_ncdm'] = m_nu_camb*gfact**0.75/94.07/h**2
-                del self.cosmo_arguments[elem]
-            elif elem == 'Omega_m_camb':
-                #print("Treat Omega_m_camb")
-                if "Omega_ncdm" in self.cosmo_arguments:
-                    self.cosmo_arguments['Omega_cdm'] = self.cosmo_arguments['Omega_m_camb'] - self.cosmo_arguments['Omega_b'] - self.cosmo_arguments['Omega_ncdm']
-                else:
-                    raise ValueError("Could not find Omega_cdm because Omega_ncdm not computed yet")
-                del self.cosmo_arguments[elem]
-            elif elem == 'S_8':
-                # infer sigma8 from S_8, h, omega_b, omega_cdm, and omega_nu (omega_nu = sum(m_nu) / 93.14)
-                # Originally by B. Stoelzner for one massive neutrino
-                # Generalized by T. Brinckmann to arbitrary number of massive neutrinos and different parameter names
-                # applied MCMC parameter scaling only for small omega parameters, betting no one rescales the rest
-
-                # Check for the Hubble parameter, return error if not provided
-                if 'h' in self.cosmo_arguments:
-                    h = self.cosmo_arguments['h']
-                elif 'H0' in self.cosmo_arguments:
-                    h = self.cosmo_arguments['H0']/100.
-                else:
-                    raise io_mp.ConfigurationError("S_8 as a sampling parameter requires h",
-                                                   "or H0 as a fixed or varying parameter")
-                # Check for omega_b, return error if not provided
-                if 'omega_b' in self.cosmo_arguments:
-                    scale = 1.
-                    if 'omega_b' in self.mcmc_parameters:
-                        scale = self.mcmc_parameters['omega_b']['scale']
-                    omega_b = self.cosmo_arguments['omega_b'] * scale
-                elif 'Omega_b' in self.cosmo_arguments:
-                    omega_b = self.cosmo_arguments['Omega_b'] * h**2
-                else:
-                    raise io_mp.ConfigurationError("S_8 as a sampling parameter requires omega_b",
-                                                   "or Omega_b as a fixed or varying parameter")
-
-                # Check for omega_cdm, return error if not provided
-                # S_8 is not implemented for different kinds of DM, e.g. DCDM or WDM
-                # If your DM behaves as CDM and doesn't affect S_8 beyond that
-                # then you can add an if statement below to catch the variable name
-                if 'omega_cdm' in self.cosmo_arguments:
-                    scale = 1.
-                    if 'omega_cdm' in self.mcmc_parameters:
-                        scale = self.mcmc_parameters['omega_cdm']['scale']
-                    omega_cdm = self.cosmo_arguments['omega_cdm'] * scale
-                elif 'Omega_cdm' in self.cosmo_arguments:
-                    omega_cdm = self.cosmo_arguments['Omega_cdm'] * h**2
-                else:
-                    raise io_mp.ConfigurationError("S_8 as a sampling parameter requires omega_cdm",
-                                                   "or Omega_cdm as a fixed or varying parameter")
-
-                # Check for massive neutrinos and compute omega_nu if relevant
-                if 'omega_ncdm' in self.cosmo_arguments:
-                    scale = 1.
-                    if 'omega_nu' in self.mcmc_parameters:
-                        scale =self.mcmc_parameters['omega_nu']['scale']
-                    omega_nu = self.cosmo_arguments['omega_ncdm'] * scale
-                elif 'Omega_ncdm' in self.cosmo_arguments:
-                    omega_nu = self.cosmo_arguments['omega_ncdm'] * h**2
-                elif 'M_tot' in self.cosmo_arguments:
-                    omega_nu = self.cosmo_arguments['M_tot'] / 93.14
-                elif 'M_nu' in self.cosmo_arguments:
-                    omega_nu = self.cosmo_arguments['M_nu'] / 93.14
-                elif 'Mnu' in self.cosmo_arguments:
-                    omega_nu = self.cosmo_arguments['Mnu'] / 93.14
-                elif '{\sum}m_nu' in self.cosmo_arguments:
-                    omega_nu = self.cosmo_arguments['{\sum}m_nu'] / 93.14
-                elif '{\sum}mnu' in self.cosmo_arguments:
-                    omega_nu = self.cosmo_arguments['{\sum}mnu'] / 93.14
-                elif 'm_ncdm' in self.cosmo_arguments:
-                    # Check number of massive neutrinos, assume 1 (CLASS default) if not specified
-                    if 'deg_ncdm' in self.cosmo_arguments:
-                        if type(self.cosmo_arguments['deg_ncdm']) == str:
-                            deg_ncdm = np.array(self.cosmo_arguments['deg_ncdm'].split(','), dtype='float')
+                            # Compute neutrino mass sum based on number of massive neutrinos
+                            if type(self.cosmo_arguments['m_ncdm']) == str:
+                                m_ncdm = np.array(self.cosmo_arguments['m_ncdm'].split(','), dtype='float')
+                            else:
+                                m_ncdm = np.array(float(self.cosmo_arguments['m_ncdm']))
+                            omega_nu = np.dot(deg_ncdm,m_ncdm) / 93.14
                         else:
-                            deg_ncdm = np.array(float(self.cosmo_arguments['deg_ncdm']))
+                            raise io_mp.ConfigurationError("N_ncdm is greater than 0, but couldn't identify any of",
+                                                        "{m_ncdm,omega_ncdm,Omega_ncdm,M_tot,M_nu,Mnu,{\sum}m_nu,{\sum}mnu}")
                     else:
-                        deg_ncdm = np.array(1.)
+                        omega_nu = 0.
 
-                    # Compute neutrino mass sum based on number of massive neutrinos
-                    if type(self.cosmo_arguments['m_ncdm']) == str:
-                        m_ncdm = np.array(self.cosmo_arguments['m_ncdm'].split(','), dtype='float')
+                    # Check for omega_b or Omega_b, return error if not provided
+                    if 'omega_b' in self.cosmo_arguments:
+                        # MCMC parameter scaling for omega_b, if relevant
+                        #scale = 1.
+                        #if 'omega_b' in self.mcmc_parameters:
+                        #    scale = self.mcmc_parameters['omega_b']['scale']
+                        omega_b = self.cosmo_arguments['omega_b'] #* scale
+                        # added 02/10/2024 scale already accounted for in the cosmo arguments
+                    elif 'Omega_b' in self.cosmo_arguments:
+                        # We need h to go from Omega_b to omega_b, return error if not provided
+                        if 'h' in self.cosmo_arguments:
+                            omega_b = self.cosmo_arguments['Omega_b']*self.cosmo_arguments['h']**2
+                        elif 'H0' in self.cosmo_arguments:
+                            omega_b = self.cosmo_arguments['Omega_b']*(self.cosmo_arguments['H0']/100.)**2
+                        else:
+                            raise io_mp.ConfigurationError("Could not find h directy, since neither of {h,H0} are defined")
                     else:
-                        m_ncdm = np.array(float(self.cosmo_arguments['m_ncdm']))
-                    omega_nu = np.dot(deg_ncdm,m_ncdm) / 93.14
-                else:
-                    omega_nu = 0.
-                self.cosmo_arguments['sigma8'] = self.cosmo_arguments['S_8'] * ((0.3*h**2) / (omega_b+omega_cdm+omega_nu))**0.5
-                del self.cosmo_arguments[elem]
+                        raise io_mp.ConfigurationError("Could not indentify any of {omega_b,Omega_b} for the definition of omega_m")
+
+                    # If you have additional massive dark species they should be included below
+                    self.cosmo_arguments['omega_cdm'] = omega_m - omega_b - omega_nu # added 30/09/2024 probably forgotten before ?
+                    del self.cosmo_arguments[elem]
+                    
+                # Same as for 'omega_m', just with 'Omega_m' instead
+                elif elem == 'Omega_m':
+                    Omega_m = self.cosmo_arguments['Omega_m']
+
+                    # Check for massive neutrinos and compute omega_nu if relevant
+                    if 'N_ncdm' in self.cosmo_arguments and self.cosmo_arguments['N_ncdm']>0:
+                        if 'Omega_ncdm' in self.cosmo_arguments:
+                            Omega_nu = self.cosmo_arguments['Omega_ncdm']
+                        elif 'omega_ncdm' in self.cosmo_arguments:
+                            # MCMC parameter scaling for omega_ncdm, if relevant
+                            scale = 1.
+                            if 'omega_ncdm' in self.mcmc_parameters:
+                                scale = self.mcmc_parameters['omega_ncdm']['scale']
+                            omega_nu = self.cosmo_arguments['omega_ncdm'] * scale
+                        elif 'M_tot' in self.cosmo_arguments:
+                            omega_nu = self.cosmo_arguments['M_tot'] / 93.14
+                        elif 'M_nu' in self.cosmo_arguments:
+                            omega_nu = self.cosmo_arguments['M_nu'] / 93.14
+                        elif 'Mnu' in self.cosmo_arguments:
+                            omega_nu = self.cosmo_arguments['Mnu'] / 93.14
+                        elif '{\sum}m_nu' in self.cosmo_arguments:
+                            omega_nu = self.cosmo_arguments['{\sum}m_nu'] / 93.14
+                        elif '{\sum}mnu' in self.cosmo_arguments:
+                            omega_nu = self.cosmo_arguments['{\sum}mnu'] / 93.14
+                        elif 'm_ncdm' in self.cosmo_arguments:
+                            # Check number of massive neutrinos, assume 1 (CLASS default) if not specified
+                            if 'deg_ncdm' in self.cosmo_arguments:
+                                if type(self.cosmo_arguments['deg_ncdm']) == str:
+                                    deg_ncdm = np.array(self.cosmo_arguments['deg_ncdm'].split(','), dtype='float')
+                                else:
+                                    deg_ncdm = np.array(float(self.cosmo_arguments['deg_ncdm']))
+                            else:
+                                deg_ncdm = np.array(1.)
+
+                            # Compute neutrino mass sum based on number of massive neutrinos
+                            if type(self.cosmo_arguments['m_ncdm']) == str:
+                                m_ncdm = np.array(self.cosmo_arguments['m_ncdm'].split(','), dtype='float')
+                            else:
+                                m_ncdm = np.array(float(self.cosmo_arguments['m_ncdm']))
+                            omega_nu = np.dot(deg_ncdm,m_ncdm) / 93.14
+                        else:
+                            raise io_mp.ConfigurationError("N_ncdm is greater than 0, but couldn't identify any of",
+                                                        "{m_ncdm,omega_ncdm,Omega_ncdm,M_tot,M_nu,Mnu,{\sum}m_nu,{\sum}mnu}")
+                        # We need h to go from omega_nu to Omega_nu if the former was computed, return error if not provided
+                        try:
+                            if omega_nu:
+                                if 'h' in self.cosmo_arguments:
+                                    Omega_nu = omega_nu / self.cosmo_arguments['h']**2
+                                elif 'H0' in self.cosmo_arguments:
+                                    Omega_nu = omega_nu / (self.cosmo_arguments['H0']/100.)**2
+                                else:
+                                    raise io_mp.ConfigurationError("Provided Omega_ncdm, but could not find h directy,",
+                                                                "since neither of {h,H0} are defined")
+                        except NameError:
+                            pass
+                    else:
+                        Omega_nu = 0.
+
+                    # Check for omega_b or Omega_b, return error if not provided
+                    if 'Omega_b' in self.cosmo_arguments:
+                        Omega_b = self.cosmo_arguments['Omega_b']
+                    elif 'omega_b' in self.cosmo_arguments:
+                        # MCMC parameter scaling for omega_b, if relevant
+                        scale = 1.
+                        if 'omega_b' in self.mcmc_parameters:
+                            scale = self.mcmc_parameters['omega_b']['scale']
+                        # We need h to go from omega_b to Omega_b, return error if not provided
+                        if "h" in self.cosmo_arguments:
+                            Omega_b = (self.cosmo_arguments['omega_b'] * scale)/self.cosmo_arguments['h']**2
+                        elif "H0" in self.cosmo_arguments:
+                            Omega_b = (self.cosmo_arguments['omega_b'] * scale)/(self.cosmo_arguments['H0']/100.)**2
+                        else:
+                            raise io_mp.ConfigurationError("Could not find h directy, since neither of {h,H0} are defined")
+                    else:
+                        raise io_mp.ConfigurationError("Could not indentify any of {omega_b,Omega_b} for the definition of Omega_m")
+
+                    # If you have additional massive dark species they should be included below
+                    self.cosmo_arguments['Omega_cdm'] = Omega_m - Omega_b - Omega_nu
+                    del self.cosmo_arguments[elem]
+                elif elem == 'log10N_dg':
+                    self.cosmo_arguments['N_dg'] = 10**(self.cosmo_arguments[elem])
+                    del self.cosmo_arguments[elem]
+                elif elem == 'log10fn':
+                    self.cosmo_arguments['f_nadm'] = 10**(self.cosmo_arguments[elem])
+                    del self.cosmo_arguments[elem]
+                elif elem == 'log10Gamma':
+                    self.cosmo_arguments['invtau0_nadm_dg'] = 10**(self.cosmo_arguments[elem])
+                    del self.cosmo_arguments[elem]
+                elif elem == 'w0wa':
+                    self.cosmo_arguments['wa_fld'] = self.cosmo_arguments[elem] - self.cosmo_arguments['w0_fld']
+                    del self.cosmo_arguments[elem]
+                elif elem == 'N_eff_camb':
+                    #self.cosmo_arguments['N_ur'] = 2./3.*self.cosmo_arguments[elem]
+                    N_eff_fid = 3.044
+                    self.cosmo_arguments['N_ur'] = self.cosmo_arguments[elem] - N_eff_fid/3.
+                    del self.cosmo_arguments[elem]
+                elif elem == 'm_nu_camb':
+                    N_eff_fid = 3.044
+                    #print ("Treat m_nu_camb")
+                    #if "N_eff_camb" in self.cosmo_arguments:
+                    #    gfact = self.cosmo_arguments['N_eff_camb']/3.
+                    #elif "N_ur" in self.cosmo_arguments:
+                    #    gfact = self.cosmo_arguments['N_ur']/2.
+                    #else:
+                    #    raise ValueError("Could not find Omega_ncdm because N_eff_camb and N_ur both undefined")
+                    gfact =N_eff_fid/3.
+
+                    self.cosmo_arguments['T_ncdm'] = pow(4./11.,1./3.)*pow(gfact,1./4.)
+                    if "h" in self.cosmo_arguments:
+                        h = float(self.cosmo_arguments['h'])
+                    elif "H0" in self.cosmo_arguments:
+                        h = float(self.cosmo_arguments['H0'])/100
+
+                    m_nu_camb = float(self.cosmo_arguments['m_nu_camb'])
+                    self.cosmo_arguments['Omega_ncdm'] = m_nu_camb*gfact**0.75/94.07/h**2
+                    del self.cosmo_arguments[elem]
+                elif elem == 'Omega_m_camb':
+                    #print("Treat Omega_m_camb")
+                    if "Omega_ncdm" in self.cosmo_arguments:
+                        self.cosmo_arguments['Omega_cdm'] = self.cosmo_arguments['Omega_m_camb'] - self.cosmo_arguments['Omega_b'] - self.cosmo_arguments['Omega_ncdm']
+                    else:
+                        raise ValueError("Could not find Omega_cdm because Omega_ncdm not computed yet")
+                    del self.cosmo_arguments[elem]
+                elif elem == 'S_8':
+                    # infer sigma8 from S_8, h, omega_b, omega_cdm, and omega_nu (omega_nu = sum(m_nu) / 93.14)
+                    # Originally by B. Stoelzner for one massive neutrino
+                    # Generalized by T. Brinckmann to arbitrary number of massive neutrinos and different parameter names
+                    # applied MCMC parameter scaling only for small omega parameters, betting no one rescales the rest
+
+                    # Check for the Hubble parameter, return error if not provided
+                    if 'h' in self.cosmo_arguments:
+                        h = self.cosmo_arguments['h']
+                    elif 'H0' in self.cosmo_arguments:
+                        h = self.cosmo_arguments['H0']/100.
+                    else:
+                        raise io_mp.ConfigurationError("S_8 as a sampling parameter requires h",
+                                                    "or H0 as a fixed or varying parameter")
+                    # Check for omega_b, return error if not provided
+                    if 'omega_b' in self.cosmo_arguments:
+                        scale = 1.
+                        if 'omega_b' in self.mcmc_parameters:
+                            scale = self.mcmc_parameters['omega_b']['scale']
+                        omega_b = self.cosmo_arguments['omega_b'] * scale
+                    elif 'Omega_b' in self.cosmo_arguments:
+                        omega_b = self.cosmo_arguments['Omega_b'] * h**2
+                    else:
+                        raise io_mp.ConfigurationError("S_8 as a sampling parameter requires omega_b",
+                                                    "or Omega_b as a fixed or varying parameter")
+
+                    # Check for omega_cdm, return error if not provided
+                    # S_8 is not implemented for different kinds of DM, e.g. DCDM or WDM
+                    # If your DM behaves as CDM and doesn't affect S_8 beyond that
+                    # then you can add an if statement below to catch the variable name
+                    if 'omega_cdm' in self.cosmo_arguments:
+                        scale = 1.
+                        if 'omega_cdm' in self.mcmc_parameters:
+                            scale = self.mcmc_parameters['omega_cdm']['scale']
+                        omega_cdm = self.cosmo_arguments['omega_cdm'] * scale
+                    elif 'Omega_cdm' in self.cosmo_arguments:
+                        omega_cdm = self.cosmo_arguments['Omega_cdm'] * h**2
+                    else:
+                        raise io_mp.ConfigurationError("S_8 as a sampling parameter requires omega_cdm",
+                                                    "or Omega_cdm as a fixed or varying parameter")
+
+                    # Check for massive neutrinos and compute omega_nu if relevant
+                    if 'omega_ncdm' in self.cosmo_arguments:
+                        scale = 1.
+                        if 'omega_nu' in self.mcmc_parameters:
+                            scale =self.mcmc_parameters['omega_nu']['scale']
+                        omega_nu = self.cosmo_arguments['omega_ncdm'] * scale
+                    elif 'Omega_ncdm' in self.cosmo_arguments:
+                        omega_nu = self.cosmo_arguments['omega_ncdm'] * h**2
+                    elif 'M_tot' in self.cosmo_arguments:
+                        omega_nu = self.cosmo_arguments['M_tot'] / 93.14
+                    elif 'M_nu' in self.cosmo_arguments:
+                        omega_nu = self.cosmo_arguments['M_nu'] / 93.14
+                    elif 'Mnu' in self.cosmo_arguments:
+                        omega_nu = self.cosmo_arguments['Mnu'] / 93.14
+                    elif '{\sum}m_nu' in self.cosmo_arguments:
+                        omega_nu = self.cosmo_arguments['{\sum}m_nu'] / 93.14
+                    elif '{\sum}mnu' in self.cosmo_arguments:
+                        omega_nu = self.cosmo_arguments['{\sum}mnu'] / 93.14
+                    elif 'm_ncdm' in self.cosmo_arguments:
+                        # Check number of massive neutrinos, assume 1 (CLASS default) if not specified
+                        if 'deg_ncdm' in self.cosmo_arguments:
+                            if type(self.cosmo_arguments['deg_ncdm']) == str:
+                                deg_ncdm = np.array(self.cosmo_arguments['deg_ncdm'].split(','), dtype='float')
+                            else:
+                                deg_ncdm = np.array(float(self.cosmo_arguments['deg_ncdm']))
+                        else:
+                            deg_ncdm = np.array(1.)
+
+                        # Compute neutrino mass sum based on number of massive neutrinos
+                        if type(self.cosmo_arguments['m_ncdm']) == str:
+                            m_ncdm = np.array(self.cosmo_arguments['m_ncdm'].split(','), dtype='float')
+                        else:
+                            m_ncdm = np.array(float(self.cosmo_arguments['m_ncdm']))
+                        omega_nu = np.dot(deg_ncdm,m_ncdm) / 93.14
+                    else:
+                        omega_nu = 0.
+                    self.cosmo_arguments['sigma8'] = self.cosmo_arguments['S_8'] * ((0.3*h**2) / (omega_b+omega_cdm+omega_nu))**0.5
+                    del self.cosmo_arguments[elem]
 
             # Finally, deal with all the parameters ending with __i, where i is
             # an integer. Replace them all with their name without the trailing
@@ -1271,11 +1315,261 @@ class Data(object):
                     del self.cosmo_arguments[
                         original_name + '__%i' % index]
         
-        # if we set the kmax according to the current valye of the arguments
-        if 'UVLuminosity' in self.lkl:
-            self.cosmo_arguments['P_k_max_h/Mpc'] = self.lkl['UVLuminosity'].get_k_max(self)
- 
+        
+    def set_astro_config(self) -> None:
+        """
+        Set the cosmo and astro parameters when the input_config option is set to 'astro'
+        Note that the main difference here is that reionization is handled by an external
+        module which is called in this function.
+        """
 
+        if 'omega_dm' not in self.mcmc_parameters:
+            raise io_mp.ConfigurationError("input_config as astro needs omega_dm as input parameter")
+        if 'omega_b' not in self.mcmc_parameters:
+            raise io_mp.ConfigurationError("input_config as astro needs omega_b as input parameter")
+        if 'h' not in self.mcmc_parameters:
+            raise io_mp.ConfigurationError("input_config as astro needs h as input parameter")
+
+        omega_dm  = self.cosmo_arguments['omega_dm']
+        omega_b   = self.cosmo_arguments['omega_b']
+
+        # first define omega_cdm in as the difference of dm and baryons
+        # then the warm and hot components will be removed below
+        omega_cdm = omega_dm - omega_b
+
+        # omega_dm is not passed to class in the end
+        # will be replaced by omega_cdm and f_wdm
+        del self.cosmo_arguments['omega_dm']
+
+        ###########
+        ## DEFINE NEUTRINO MASSES BEFORE ANYTHING ELSE
+        delta_m21_2 = 7.5e-5
+        delta_m31_NO_2 = 2.55e-3
+        delta_m31_IO_2 = 2.45e-3
+        
+        # by default we assume that neutrinos are set by each mass
+        m_nu1 = self.cosmo_arguments.get('m_nu1', 0.0)
+        m_nu2 = self.cosmo_arguments.get('m_nu2', 0.0)
+        m_nu3 = self.cosmo_arguments.get('m_nu3', 0.0)
+
+        # degenerate neutrino masses (all equal to the first one)
+        if self.options.get('nu_hierarchy', 'none') == 'degenerate':
+            m_nu2 = m_nu1
+            m_nu3 = m_nu1
+
+            io_mp.ConfigurationError('Impossible to run the degenerate neurtrino mass case for now')
+
+        # normal ordering
+        if self.options.get('nu_hierarchy', 'none') == 'normal':
+            m_nu2 = np.sqrt(m_nu1**2 + delta_m21_2) 
+            m_nu3 = np.sqrt(m_nu1**2 + delta_m31_NO_2)
+
+        # inverse ordering
+        if self.options.get('nu_hierarchy', 'none') == 'inverse':
+            m_nu2 = np.sqrt(m_nu1**2 + delta_m31_IO_2) 
+            m_nu3 = np.sqrt(m_nu1**2 + delta_m31_IO_2 + delta_m21_2)
+
+            io_mp.ConfigurationError('Impossible to run the inverse hierarchy neurtrino mass case for now')
+
+        # create an array of neutrino masses
+        m_neutrinos = np.array([m_nu1, m_nu2, m_nu3])
+        ###########
+
+        if 'm_nu1' in self.cosmo_arguments:
+            del self.cosmo_arguments['m_nu1']
+        if 'm_nu2' in self.cosmo_arguments:
+            del self.cosmo_arguments['m_nu2']
+        if 'm_nu3' in self.cosmo_arguments:
+            del self.cosmo_arguments['m_nu3']
+
+
+        neff_array = np.array([3.044, 2.0308, 1.0176, 0.00441])
+
+        #################################################
+        # CHECK FOR NON-CDM MODEL
+        # create strings containing the degeneracy number and the mass
+        # of every ncdm non degenerate neutrino species or warm dark matter
+        deg_ncdm = np.array([], dtype=int)
+        m_ncdm   = np.array([])
+        T_ncdm   = np.array([])
+        n_ncdm   = 0
+        n_ur     = neff_array[0]
+        fluid_approx = np.array([], dtype=int)
+
+        #############################################
+        ## MASSIVE NEUTRINOS
+
+        nu_fluid_approx = self.cosmo_arguments.get('nu_fluid_approx', 2)
+        if 'nu_fluid_approx' in self.mcmc_parameters:
+            del self.cosmo_arguments['nu_fluid_approx']
+
+        # for massive neutrinos we set the parameters here
+        if np.sum(m_neutrinos) > 0:
+
+            # get the unique masses
+            m_unique_neutrinos = np.unique(m_neutrinos)
+
+            # get the number of species with different mass
+            n_neutrinos = np.count_nonzero(m_unique_neutrinos)
+            n_ncdm = n_ncdm  + n_neutrinos
+
+            # attribute degeneracy number, mass and temperature to all neutrinos "classes"
+            for m_neutrino in m_unique_neutrinos:
+                if m_neutrino > 0:
+                    deg_ncdm = np.append(deg_ncdm, len(np.where(m_neutrinos == m_neutrino)[0]))
+                    m_ncdm   = np.append(m_ncdm, str(m_neutrino))
+                    T_ncdm   = np.append(T_ncdm, 0.71611)
+                    fluid_approx = np.append(fluid_approx, nu_fluid_approx)
+                
+            # recalculate the value of omega_cdm by removing the neurtino component
+            omega_cdm = omega_cdm - np.sum(m_neutrinos)/93.14
+
+            # set the number of ultra relativistic degrees of freedom
+            # to the correct values according to the total number 
+            # of massive neutrinos
+            n_ur = neff_array[np.count_nonzero(m_neutrinos)]
+
+
+        #############################################
+        ## WARM DARK MATTER
+        
+        wdm_fluid_approx = self.cosmo_arguments.get('wdm_fluid_approx', 2)
+        if 'wdm_fluid_approx' in self.mcmc_parameters:
+            del self.cosmo_arguments['wdm_fluid_approx']
+
+        # assign a variable for the fraction of warm dark matter 
+        f_wdm = self.cosmo_arguments.get('f_wdm', 0)
+        if 'f_wdm' in self.cosmo_arguments:
+            del self.cosmo_arguments['f_wdm']
+
+        # define warm dark matter properties here if fraction above 0
+        if f_wdm > 0:
+            
+            # remove warm dark matter mass the cdm component
+            # omega_cdm is already stripped from the neutrino mass
+            omega_wdm = omega_cdm * f_wdm
+            omega_cdm  = omega_cdm * (1 - f_wdm)
+
+            n_wdm = 1
+
+            # set the WDM mass
+            if 'm_wdm' in self.mcmc_parameters: 
+                m_wdm = self.cosmo_arguments['m_wdm']
+                del self.cosmo_arguments['m_wdm']
+                #_m_ncdm_string = _m_ncdm_string + "," + str(cosmo_params.M_WDM * 1e+3)
+            
+            elif '1/m_wdm' in self.mcmc_parameters:
+                if self.cosmo_arguments['1/m_wdm'] > 0:
+                    #_m_ncdm_string = _m_ncdm_string + "," + str(1.0/cosmo_params.INVERSE_M_WDM * 1e+3)
+                    m_wdm = 1.0/self.cosmo_arguments['1/m_wdm']
+                elif self.cosmo_arguments['1/m_wdm'] == 0:
+                    # for an infinite DM mass no NCDM 
+                    n_wdm = 0
+                else:
+                    raise ValueError("Impossible to assign a negative value WDM mass")
+                
+                del self.cosmo_arguments['1/m_wdm']
+            else:
+                raise io_mp.ConfigurationError("if f_wdm defined and > 0 need to pass m_wdm or 1/m_wdm")
+
+
+            # add a new particle to the list of non cold dark matter
+            # wdm as degree of freedom 1 and account for 1 new species
+            # only doing it if we do have warm dark matter
+            n_ncdm   = n_ncdm + n_wdm
+            if n_wdm > 0:
+                deg_ncdm = np.append(deg_ncdm, 1)
+                m_ncdm   = np.append(m_ncdm, m_wdm)
+                T_ncdm   = np.append(T_ncdm,  0.71611 * (omega_wdm * 93.14 / m_wdm)**(1./3.))
+                fluid_approx = np.append(fluid_approx, wdm_fluid_approx)
+
+
+        #############################################
+        # preparing the input for CLASS
+
+        deg_ncdm_str     = ",".join(map(str, deg_ncdm))
+        m_ncdm_str       = ",".join(map(str, m_ncdm))
+        T_ncdm_str       = ",".join(map(str, T_ncdm))
+        fluid_approx_str = ",".join(map(str, fluid_approx))
+
+        # set m_ncdm_, N_ur and N_ncdm according to what is computed above
+        self.cosmo_arguments['omega_cdm'] = omega_cdm
+        self.cosmo_arguments['m_ncdm']    = m_ncdm_str
+        self.cosmo_arguments['N_ur']      = n_ur
+        self.cosmo_arguments['deg_ncdm']  = deg_ncdm_str
+        self.cosmo_arguments['N_ncdm']    = n_ncdm
+        self.cosmo_arguments['T_ncdm']    = T_ncdm_str
+        self.cosmo_arguments['ncdm_fluid_approximation'] = fluid_approx_str
+
+        #############################################
+        # Computing reionization
+
+        if 'log10_f_star10' not in self.mcmc_parameters:
+            raise io_mp.ConfigurationError("input_config as astro needs log10_f_star10 as input parameter")
+        if 'alpha_star' not in self.mcmc_parameters:
+            raise io_mp.ConfigurationError("input_config as astro needs alpha_star as input parameter")
+        if 'log10_f_esc10' not in self.mcmc_parameters:
+            raise io_mp.ConfigurationError("input_config as astro needs log10_f_esc10 as input parameter")
+        if 'alpha_esc' not in self.mcmc_parameters:
+            raise io_mp.ConfigurationError("input_config as astro needs alpha_esc as input parameter")
+        if 't_star' not in self.mcmc_parameters:
+            raise io_mp.ConfigurationError("input_config as astro needs t_star as input parameter")
+        if 'log10_m_turn' not in self.mcmc_parameters:
+            raise io_mp.ConfigurationError("input_config as astro needs log10_m_turn as input parameter")
+        if 'log10_lum_X' not in self.mcmc_parameters:
+            raise io_mp.ConfigurationError("input_config as astro needs log10_lum_X as input parameter")
+        if 'nu_X_thresh' not in self.mcmc_parameters:
+            raise io_mp.ConfigurationError("input_config as astro needs nu_X_thresh as input parameter")
+
+        # call the regressor to obtain the reionization
+        xHII = nnero.predict_xHII(self.xHII_classifier, self.xHII_regressor,
+                                  Ombh2 = omega_b,
+                                  Omch2 = omega_dm, # in NNERO Omch2 is currently omega_dm
+                                  hlittle = self.cosmo_arguments['h'],
+                                  Ln_1010_As = self.cosmo_arguments['ln10^{10}A_s'],
+                                  POWER_INDEX = self.cosmo_arguments['n_s'],
+                                  INVERSE_M_WDM = 1/m_wdm*1e+3, # given in keV in nnero
+                                  FRAC_WDM = f_wdm,
+                                  NEUTRINO_MASS_1 = m_nu1, 
+                                  F_STAR10 = self.astro_arguments['log10_f_star10'],
+                                  ALPHA_STAR = self.astro_arguments['alpha_star'], 
+                                  F_ESC10 = self.astro_arguments['log10_f_esc10'],
+                                  ALPHA_ESC = self.astro_arguments['alpha_esc'],
+                                  t_STAR = self.astro_arguments['t_star'],
+                                  M_TURN = self.astro_arguments['log10_m_turn'],
+                                  L_X = self.astro_arguments['log10_lum_X'],
+                                  NU_X_THRESH = self.astro_arguments['nu_X_thresh'],)
+        
+        # redshifts corresponding to the value of xHII above
+        z = self.xHII_regressor.metadata.z
+
+        # complete reionization history down to z = 0
+        z_full = np.linspace(0, z[0], 10)
+        x_full = np.ones(len(z_full))
+        z_full = np.concatenate((z_full[:-1], z))
+
+        # take into account the times when the predictor outputs False
+        if xHII is not False:
+            x_full = np.concatenate((x_full[:-1], xHII))
+        else:
+            x_full = -np.ones(len(z_full))
+    
+        # class conventions to account for Helium reionization
+        # in the free electron fraction
+        x_full[x_full == 1] = -1
+        x_full[z_full < 3]  = -2
+        x_full[-1] = 0.0
+
+        # pass the argument to class
+        # set the input parameter to interpolation
+        self.cosmo_arguments['reio_parametrization'] = 'reio_inter'
+        self.cosmo_arguments['reio_inter_num'] = len(z_full)
+        self.cosmo_arguments['reio_inter_z']   = str(list(z_full)).strip(']').strip('[')
+        
+        if xHII is not False:
+            self.cosmo_arguments['reio_inter_xe']  = str(list(x_full)).strip(']').strip('[')
+        else:
+            self.cosmo_arguments['reio_inter_xe'] = -1
 
     @staticmethod
     def folder_is_initialised(folder):
@@ -1377,11 +1671,24 @@ class Data(object):
             self.mcmc_parameters[elem]['current'] = parameters[index]
 
         # Propagating this to the cosmo_arguments dictionary
-        self.update_cosmo_arguments()
-        self.update_astro_arguments()
+        self.update_cosmo_astro_arguments()
 
         # Store itself into the context
         ctx.add('data', self)
+
+
+
+    def get_xHII_from_NN(self):
+
+        if not NNERO_IMPORTED:
+            raise ImportError("Need NNERO package to get the neural network estimation of the ionization fraction")
+
+        #
+
+        # predict the ionization fraction from the NN
+        #return nnero.predict_xHII(self.xHII_classifier, self.xHII_regressor, 
+        #                            F_STAR10 = f_star10, ALPHA_STAR = alpha_star, t_STAR = t_star, M_TURN = m_turn,
+        #                            )
 
 
 class Parameter(dict):
@@ -1482,3 +1789,6 @@ if __name__ == "__main__":
     cosmo, data, command_line, _ = initialise('-o %s -p test.param' % folder)
     doctest.testmod(extraglobs={'data': data})
     shutil.rmtree(folder)
+
+
+

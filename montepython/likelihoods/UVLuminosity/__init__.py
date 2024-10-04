@@ -56,14 +56,14 @@ class UVLuminosity(Likelihood):
         if 't_star' not in data.mcmc_parameters:
             raise io_mp.LikelihoodError("t_star is a required input parameter")
          
-        if 'ln10_f_star10' not in data.mcmc_parameters:
-            raise io_mp.LikelihoodError("ln10_f_star10 is a required input parameter") 
+        if 'log10_f_star10' not in data.mcmc_parameters:
+            raise io_mp.LikelihoodError("log10_f_star10 is a required input parameter") 
         
 
         # get the current values in the chain
         alpha_star = data.mcmc_parameters['alpha_star']['current']*data.mcmc_parameters['alpha_star']['scale']
         t_star     = data.mcmc_parameters['t_star']['current']*data.mcmc_parameters['t_star']['scale']
-        f_star10   = 10**(data.mcmc_parameters['ln10_f_star10']['current']*data.mcmc_parameters['ln10_f_star10']['scale'])
+        f_star10   = 10**(data.mcmc_parameters['log10_f_star10']['current']*data.mcmc_parameters['log10_f_star10']['scale'])
 
         omega_b = data.mcmc_parameters['omega_b']['current']*data.mcmc_parameters['omega_b']['scale']
         omega_m = data.mcmc_parameters['omega_m']['current']*data.mcmc_parameters['omega_m']['scale']
@@ -76,7 +76,7 @@ class UVLuminosity(Likelihood):
             # loop on the redshift bins
             for iz, z, in enumerate(self.z_uv_exp[j]):
 
-                hz = nnero.h_factor_no_rad(z, omega_b, omega_m - omega_b, h)[0, 0] * nnero.CONVERSIONS.km_to_mpc # approximation of the hubble factor
+                hz = nnero.cosmology.h_factor_no_rad(z, omega_b, omega_m - omega_b, h)[0, 0] * nnero.CONVERSIONS.km_to_mpc # approximation of the hubble factor
                 mh = nnero.astrophysics.m_halo(hz, self.m_uv_exp[j][iz], alpha_star, t_star, f_star10, omega_b, omega_m)[0, 0]
 
                 # set the min of mh
@@ -102,17 +102,17 @@ class UVLuminosity(Likelihood):
         if 't_star' not in data.mcmc_parameters:
             raise io_mp.LikelihoodError("t_star is a required input parameter")
          
-        if 'ln10_f_star10' not in data.mcmc_parameters:
-            raise io_mp.LikelihoodError("ln10_f_star10 is a required input parameter") 
+        if 'log10_f_star10' not in data.mcmc_parameters:
+            raise io_mp.LikelihoodError("log10_f_star10 is a required input parameter") 
          
-        if 'ln10_m_turn' not in data.mcmc_parameters:
-            raise io_mp.LikelihoodError("ln10_m_turn is a required input parameter") 
+        if 'log10_m_turn' not in data.mcmc_parameters:
+            raise io_mp.LikelihoodError("log10_m_turn is a required input parameter") 
 
         # get the current values in the chain
         alpha_star = data.mcmc_parameters['alpha_star']['current']*data.mcmc_parameters['alpha_star']['scale']
         t_star     = data.mcmc_parameters['t_star']['current']*data.mcmc_parameters['t_star']['scale']
-        f_star10   = 10**(data.mcmc_parameters['ln10_f_star10']['current']*data.mcmc_parameters['ln10_f_star10']['scale'])
-        m_turn     = 10**(data.mcmc_parameters['ln10_m_turn']['current']*data.mcmc_parameters['ln10_m_turn']['scale'])
+        f_star10   = 10**(data.mcmc_parameters['log10_f_star10']['current']*data.mcmc_parameters['log10_f_star10']['scale'])
+        m_turn     = 10**(data.mcmc_parameters['log10_m_turn']['current']*data.mcmc_parameters['log10_m_turn']['scale'])
      
         # get values from CLASS
         h       = cosmo.h()
@@ -132,7 +132,7 @@ class UVLuminosity(Likelihood):
             # loop on the redshift bins
             for iz, z, in enumerate(self.z_uv_exp[j]):
 
-                hz = cosmo.Hubble(z) * 1e-3 * nnero.constants.CST_EV_M_S_K.c_light * nnero.CONVERSIONS.km_to_mpc / (1e+2 * h)
+                hz = cosmo.Hubble(z) * 1e-3 * nnero.CST_EV_M_S_K.c_light * nnero.CONVERSIONS.km_to_mpc / (1e+2 * h)
                 mh = nnero.astrophysics.m_halo(hz, self.m_uv_exp[j][iz], alpha_star, t_star, f_star10, omega_b, omega_m)
                 
                 try:
@@ -146,7 +146,7 @@ class UVLuminosity(Likelihood):
                     return -np.inf
 
                 # get a sigma that is either the down or the up one depending 
-                # if prediction is lower / higher than the experimental value
+                # if prediction is lower / higher than the observed value
                 mask = (phi_uv_pred_z > self.phi_uv_exp[j][iz])
                 sigma = self.sigma_phi_uv_down[j][iz]
                 sigma[mask] = self.sigma_phi_uv_up[j][iz][mask]

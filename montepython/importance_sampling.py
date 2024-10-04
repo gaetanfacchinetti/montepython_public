@@ -177,8 +177,7 @@ def translate_chain(data, cosmo, command_line,
                 for index, param in enumerate(parameter_names):
                     data.mcmc_parameters[param]['current'] = \
                         float(params[2+index])
-                data.update_cosmo_arguments()
-                data.update_astro_arguments()
+                data.update_cosmo_astro_arguments()
 
                 newloglike = sampler.compute_lkl(cosmo, data)
 

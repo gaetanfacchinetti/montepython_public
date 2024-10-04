@@ -109,7 +109,7 @@ def extend_chain(data, cosmo, command_line, target_folder, chain_name,
                     data.mcmc_parameters[param]['current'] = \
                         float(params[2+index])
                 # Compute the cosmology
-                data.update_cosmo_arguments()
+                data.update_cosmo_astro_arguments()
                 if cosmo.state:
                     cosmo.struct_cleanup()
                 cosmo.set(data.cosmo_arguments)

@@ -1,0 +1,7 @@
+# Reionization likelihood
+
+# This likelihood should always be used together with
+# a CMB likelihood (e.g. Planck).
+# Important! This likelihood requires CLASS version 2.9 or higher.
+
+Reionization.a = 0

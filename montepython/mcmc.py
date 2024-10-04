@@ -191,8 +191,7 @@ def get_new_position(data, eigv, U, k, Cholesky, Rotation):
         data.mcmc_parameters[elem]['current'] = vector_new[index]
 
     # Propagate the information towards the cosmo / astro arguments
-    data.update_cosmo_arguments()
-    data.update_astro_arguments()
+    data.update_cosmo_astro_arguments()
 
     return True
 
@@ -341,8 +340,7 @@ def chain(cosmo, data, command_line):
         warnings.warn(
             "You are running with no varying parameters... I will compute " +
             "only one point and exit")
-        data.update_cosmo_arguments()  # this fills in the fixed parameters
-        data.update_astro_arguments()
+        data.update_cosmo_astro_arguments()  # this fills in the fixed parameters
         loglike = sampler.compute_lkl(cosmo, data)
         io_mp.print_vector(outputs, 1, loglike, data)
         return 1, loglike

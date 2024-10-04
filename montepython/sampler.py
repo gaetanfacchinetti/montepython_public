@@ -467,7 +467,7 @@ def chi2_eff(params, cosmo, data, bounds=False):
                 print(elem+' exceeds bounds with value %f and bounds %f < x < %f' %(params[index],bounds[index,0],bounds[index,1]))
                 return chi2
     # Update current parameters to the new parameters, only taking steps as requested
-    data.update_cosmo_arguments()
+    data.update_cosmo_astro_arguments()
     # Compute loglike value for the new parameters
     chi2 = -2.*compute_lkl(cosmo, data)
 
@@ -481,7 +481,7 @@ def gradient_chi2_eff(params, cosmo, data, bounds=False):
     for index, elem in enumerate(parameter_names):
         data.mcmc_parameters[elem]['current'] = params[index]
     # Update current parameters to the new parameters, only taking steps as requested
-    data.update_cosmo_arguments()
+    data.update_cosmo_astro_arguments()
     # Compute loglike value for the new parameters
     chi2 = -2.*compute_lkl(cosmo, data)
     # Initialise the gradient field
@@ -491,11 +491,11 @@ def gradient_chi2_eff(params, cosmo, data, bounds=False):
         #
 
         data.mcmc_parameters[elem]['current'] += dx
-        data.update_cosmo_arguments()
+        data.update_cosmo_astro_arguments()
         chi2_plus = -2.*compute_lkl(cosmo, data)
         #
         data.mcmc_parameters[elem]['current'] -= 2.*dx
-        data.update_cosmo_arguments()
+        data.update_cosmo_astro_arguments()
         chi2_minus = -2.*compute_lkl(cosmo, data)
         #
         gradient[index] = (chi2_plus - chi2_minus)/2./dx
@@ -706,6 +706,7 @@ def compute_lkl(cosmo, data):
             (data.jumping_factor == 0)):
 
         # Prepare the cosmological module with the new set of parameters
+        # print("The cosmo arguments are:", data.cosmo_arguments)
         cosmo.set(data.cosmo_arguments)
 
         # Compute the model, keeping track of the errors
@@ -725,6 +726,11 @@ def compute_lkl(cosmo, data):
             data.cosmo_arguments['output']
         except:
             data.cosmo_arguments.update({'output': ''})
+
+        if data.cosmo_arguments.get('reio_parametrization', 'none') == 'reio_inter' :
+            if data.cosmo_arguments['reio_inter_xe'] == -1:
+                return data.boundary_loglike
+
         if 'SZ' in data.cosmo_arguments['output']:
             try:
                 if 'SZ_counts':
@@ -852,7 +858,7 @@ def compute_fisher(data, command_line, cosmo, center, step_size, step_matrix):
         data.mcmc_parameters[elem]['current'] = center[elem]
 
     # Compute loglike at the point supposed to be a good estimate of the best-fit
-    data.update_cosmo_arguments()
+    data.update_cosmo_astro_arguments()
     loglike_min = compute_lkl(cosmo, data)
 
     # Loop through diagonal elements first, followed by off-diagonal elements
@@ -1142,7 +1148,7 @@ def compute_fisher_step(data, command_line, cosmo, center, step_matrix, loglike_
             data.mcmc_parameters[elem]['current'] = center[elem] + rotated_array[index]
 
         # Update current parameters to the new parameters, only taking steps as requested
-        data.update_cosmo_arguments()
+        data.update_cosmo_astro_arguments()
 
         # Compute loglike value for the new parameters
         loglike = compute_lkl(cosmo, data)
