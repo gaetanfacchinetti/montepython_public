@@ -1333,9 +1333,9 @@ class Data(object):
         omega_dm  = self.cosmo_arguments['omega_dm']
         omega_b   = self.cosmo_arguments['omega_b']
 
-        # first define omega_cdm in as the difference of dm and baryons
+        # first define omega_cdm in as the total omega_dm
         # then the warm and hot components will be removed below
-        omega_cdm = omega_dm - omega_b
+        omega_cdm = omega_dm
 
         # omega_dm is not passed to class in the end
         # will be replaced by omega_cdm and f_wdm
@@ -1448,7 +1448,7 @@ class Data(object):
             # remove warm dark matter mass the cdm component
             # omega_cdm is already stripped from the neutrino mass
             omega_wdm = omega_cdm * f_wdm
-            omega_cdm  = omega_cdm * (1 - f_wdm)
+            omega_cdm = omega_cdm * (1.0 - f_wdm)
 
             n_wdm = 1
 
@@ -1483,6 +1483,8 @@ class Data(object):
                 T_ncdm   = np.append(T_ncdm,  0.71611 * (omega_wdm * 93.14 / m_wdm)**(1./3.))
                 fluid_approx = np.append(fluid_approx, wdm_fluid_approx)
 
+
+        #print('omega_dm:', omega_dm, 'omega_cdm:', omega_cdm, 'omega_wdm:', omega_wdm, 'f_wdm:', f_wdm, 'omega_nu:', np.sum(m_neutrinos)/93.14)
 
         #############################################
         # preparing the input for CLASS
@@ -1528,7 +1530,7 @@ class Data(object):
                                   hlittle = self.cosmo_arguments['h'],
                                   Ln_1010_As = self.cosmo_arguments['ln10^{10}A_s'],
                                   POWER_INDEX = self.cosmo_arguments['n_s'],
-                                  INVERSE_M_WDM = 1/m_wdm*1e+3, # given in keV in nnero
+                                  INVERSE_M_WDM = 1.0/m_wdm*1e+3, # given in keV in nnero
                                   FRAC_WDM = f_wdm,
                                   NEUTRINO_MASS_1 = m_nu1, 
                                   F_STAR10 = self.astro_arguments['log10_f_star10'],
@@ -1540,11 +1542,12 @@ class Data(object):
                                   L_X = self.astro_arguments['log10_lum_X'],
                                   NU_X_THRESH = self.astro_arguments['nu_X_thresh'],)
         
+        
         # redshifts corresponding to the value of xHII above
         z = self.xHII_regressor.metadata.z
 
         # complete reionization history down to z = 0
-        z_full = np.linspace(0, z[0], 10)
+        z_full = np.linspace(0, z[0], 11)
         x_full = np.ones(len(z_full))
         z_full = np.concatenate((z_full[:-1], z))
 
@@ -1560,16 +1563,55 @@ class Data(object):
         x_full[z_full < 3]  = -2
         x_full[-1] = 0.0
 
+        # convert from xHII in our convention to xe in CLASS convention (factor nb/nH)
+        # ATTENTION need to fix YHe to the value of NNERO
+        x_full = x_full / (1.0 - nnero.constants.CST_NO_DIM.YHe/4.0)
+
+        def format_with_significant_digits(array, sig_digits):
+            formatted_elements = []
+            
+            for num in array:
+                if num == 0:
+                    formatted_elements.append(f"{0:.{sig_digits-1}f}")
+                else:
+                    # Calculate the number of decimal places needed for the given significant digits
+                    decimal_places = sig_digits - int(np.floor(np.log10(abs(num)))) - 1
+                    
+                    # If decimal_places is negative (for large numbers), just round to the nearest integer
+                    if decimal_places < 0:
+                        formatted_elements.append(f"{round(num, decimal_places):.0f}")
+                    else:
+                        formatted_elements.append(f"{num:.{decimal_places}f}")
+            
+            res = "[" + ", ".join(formatted_elements) + "]"
+            res = res.strip(']').strip('[').replace(" ", "")
+            return res
+        
+
         # pass the argument to class
         # set the input parameter to interpolation
         self.cosmo_arguments['reio_parametrization'] = 'reio_inter'
-        self.cosmo_arguments['reio_inter_num'] = len(z_full)
-        self.cosmo_arguments['reio_inter_z']   = str(list(z_full)).strip(']').strip('[')
+        self.cosmo_arguments['reio_inter_num']       = len(z_full)
+        self.cosmo_arguments['reio_inter_z']         = format_with_significant_digits(z_full, 3)
         
         if xHII is not False:
-            self.cosmo_arguments['reio_inter_xe']  = str(list(x_full)).strip(']').strip('[')
+            self.cosmo_arguments['reio_inter_xe']  = format_with_significant_digits(x_full, 3)
         else:
             self.cosmo_arguments['reio_inter_xe'] = -1
+
+        
+        # check for MPI
+        try:
+            from mpi4py import MPI
+            comm = MPI.COMM_WORLD
+            rank = comm.Get_rank()
+        except ImportError:
+            # set all chains to master if no MPI
+            rank = 0
+
+        #print("Rank:", rank, " | cosmo_arguments:", self.cosmo_arguments)
+
+
 
     @staticmethod
     def folder_is_initialised(folder):

@@ -8,6 +8,8 @@ import pickle
 import numpy as np
 import nnero
 
+import classy
+
 
 class UVLuminosity(Likelihood):
 
@@ -32,6 +34,7 @@ class UVLuminosity(Likelihood):
 
             self.sigma_phi_uv_down = data_uv['sigma_p_uv_down']
             self.sigma_phi_uv_up   = data_uv['sigma_p_uv_up']
+
 
 
     def get_k_max(self, data) -> (None | float):

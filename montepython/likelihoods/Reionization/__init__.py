@@ -1,6 +1,7 @@
 
 from montepython.likelihood_class import Likelihood
 
+import nnero
 
 import numpy as np
 from scipy import special, interpolate
@@ -27,7 +28,15 @@ class Reionization(Likelihood):
     def loglkl(self, cosmo, data):
  
         thermo = cosmo.get_thermodynamics()
-        xHII   = interpolate.interp1d(thermo['z'], thermo['x_e'])(self.z_reio)
+        xe     = interpolate.interp1d(thermo['z'], thermo['x_e'])(self.z_reio)
+
+        # convert xe = ne/nH to xHII ~ ne / n_b
+        # ATTENTION, need to fix YHe value to that in NNERO
+        if nnero.constants.CST_NO_DIM.YHe != cosmo.get_current_derived_parameters(['YHe'])['YHe']:
+            raise ValueError("If Reionization used, need to fix the value of YHe to that defined in NNERO")
+        
+        xHII = xe * (1.0-nnero.constants.CST_NO_DIM.YHe/4.0)
+
 
         # initialise the result
         res = np.zeros(self.z_reio.shape)
