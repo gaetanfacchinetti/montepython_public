@@ -1442,7 +1442,9 @@ class Data(object):
         if 'f_wdm' in self.cosmo_arguments:
             del self.cosmo_arguments['f_wdm']
 
-        # define warm dark matter properties here if fraction above 0
+        
+        # define warm dark matter properties here if fraction above 0    
+        n_wdm = 0    
         if f_wdm > 0:
             
             # remove warm dark matter mass the cdm component
@@ -1453,12 +1455,12 @@ class Data(object):
             n_wdm = 1
 
             # set the WDM mass
-            if 'm_wdm' in self.mcmc_parameters: 
+            if 'm_wdm' in self.cosmo_arguments: 
                 m_wdm = self.cosmo_arguments['m_wdm']
                 del self.cosmo_arguments['m_wdm']
                 #_m_ncdm_string = _m_ncdm_string + "," + str(cosmo_params.M_WDM * 1e+3)
             
-            elif '1/m_wdm' in self.mcmc_parameters:
+            elif '1/m_wdm' in self.cosmo_arguments:
                 if self.cosmo_arguments['1/m_wdm'] > 0:
                     #_m_ncdm_string = _m_ncdm_string + "," + str(1.0/cosmo_params.INVERSE_M_WDM * 1e+3)
                     m_wdm = 1.0/self.cosmo_arguments['1/m_wdm']
@@ -1482,7 +1484,13 @@ class Data(object):
                 m_ncdm   = np.append(m_ncdm, m_wdm)
                 T_ncdm   = np.append(T_ncdm,  0.71611 * (omega_wdm * 93.14 / m_wdm)**(1./3.))
                 fluid_approx = np.append(fluid_approx, wdm_fluid_approx)
-
+        
+        else:
+            if '1/m_wdm' in self.cosmo_arguments:
+                del self.cosmo_arguments['1/m_wdm']
+            if 'm_wdm' in self.cosmo_arguments:
+                del self.cosmo_arguments['m_wdm']
+        
 
         #print('omega_dm:', omega_dm, 'omega_cdm:', omega_cdm, 'omega_wdm:', omega_wdm, 'f_wdm:', f_wdm, 'omega_nu:', np.sum(m_neutrinos)/93.14)
 
@@ -1530,7 +1538,7 @@ class Data(object):
                                   hlittle = self.cosmo_arguments['h'],
                                   Ln_1010_As = self.cosmo_arguments['ln10^{10}A_s'],
                                   POWER_INDEX = self.cosmo_arguments['n_s'],
-                                  INVERSE_M_WDM = 1.0/m_wdm*1e+3, # given in keV in nnero
+                                  INVERSE_M_WDM = 1.0/m_wdm*1e+3 if (n_wdm > 0) else 0.0, # given in keV in nnero
                                   FRAC_WDM = f_wdm,
                                   NEUTRINO_MASS_1 = m_nu1, 
                                   F_STAR10 = self.astro_arguments['log10_f_star10'],
@@ -1556,6 +1564,10 @@ class Data(object):
             x_full = np.concatenate((x_full[:-1], xHII))
         else:
             x_full = -np.ones(len(z_full))
+
+        # convert from xHII in our convention to xe in CLASS convention (factor nb/nH)
+        # ATTENTION need to fix YHe to the value of NNERO
+        x_full = x_full / (1.0 - nnero.constants.CST_NO_DIM.YHe/4.0)
     
         # class conventions to account for Helium reionization
         # in the free electron fraction
@@ -1563,9 +1575,6 @@ class Data(object):
         x_full[z_full < 3]  = -2
         x_full[-1] = 0.0
 
-        # convert from xHII in our convention to xe in CLASS convention (factor nb/nH)
-        # ATTENTION need to fix YHe to the value of NNERO
-        x_full = x_full / (1.0 - nnero.constants.CST_NO_DIM.YHe/4.0)
 
         def format_with_significant_digits(array, sig_digits):
             formatted_elements = []

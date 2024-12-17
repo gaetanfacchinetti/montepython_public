@@ -79,7 +79,7 @@ class UVLuminosity(Likelihood):
             # loop on the redshift bins
             for iz, z, in enumerate(self.z_uv_exp[j]):
 
-                hz = nnero.cosmology.h_factor_no_rad(z, omega_b, omega_m - omega_b, h)[0, 0] * nnero.CONVERSIONS.km_to_mpc # approximation of the hubble factor
+                hz = 100 * nnero.cosmology.h_factor_no_rad(z, omega_b, omega_m - omega_b, h)[0, 0] * nnero.CONVERSIONS.km_to_mpc # approximation of the hubble factor
                 mh = nnero.astrophysics.m_halo(hz, self.m_uv_exp[j][iz], alpha_star, t_star, f_star10, omega_b, omega_m)[0, 0]
 
                 # set the min of mh
@@ -135,7 +135,7 @@ class UVLuminosity(Likelihood):
             # loop on the redshift bins
             for iz, z, in enumerate(self.z_uv_exp[j]):
 
-                hz = cosmo.Hubble(z) * 1e-3 * nnero.CST_EV_M_S_K.c_light * nnero.CONVERSIONS.km_to_mpc / (1e+2 * h)
+                hz = cosmo.Hubble(z) * 1e-3 * nnero.CST_EV_M_S_K.c_light * nnero.CONVERSIONS.km_to_mpc / h
                 mh = nnero.astrophysics.m_halo(hz, self.m_uv_exp[j][iz], alpha_star, t_star, f_star10, omega_b, omega_m)
                 
                 try:
