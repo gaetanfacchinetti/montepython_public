@@ -10,6 +10,8 @@ import nnero
 
 import classy
 
+from copy import deepcopy
+
 
 class UVLuminosity(Likelihood):
 
@@ -45,11 +47,11 @@ class UVLuminosity(Likelihood):
         if 'omega_b' not in data.mcmc_parameters:
             return self.kmax
             
-        if 'omega_m' not in data.mcmc_parameters:
-            return self.kmax
+        #if 'omega_m' not in data.mcmc_parameters:
+        #    return self.kmax
 
-        if 'h' not in data.mcmc_parameters:
-            return self.kmax
+        #if 'h' not in data.mcmc_parameters:
+        #    return self.kmax
     
 
         # check that some required parameters are defined
@@ -69,8 +71,8 @@ class UVLuminosity(Likelihood):
         f_star10   = 10**(data.mcmc_parameters['log10_f_star10']['current']*data.mcmc_parameters['log10_f_star10']['scale'])
 
         omega_b = data.mcmc_parameters['omega_b']['current']*data.mcmc_parameters['omega_b']['scale']
-        omega_m = data.mcmc_parameters['omega_m']['current']*data.mcmc_parameters['omega_m']['scale']
-        h       = data.mcmc_parameters['h']['current']*data.mcmc_parameters['h']['scale']
+        omega_m = 0.3 * (0.7**2) #data.mcmc_parameters['omega_m']['current']*data.mcmc_parameters['omega_m']['scale']
+        h       = 0.7 #data.mcmc_parameters['h']['current']*data.mcmc_parameters['h']['scale']
 
         min_mh = np.inf
 
@@ -88,6 +90,8 @@ class UVLuminosity(Likelihood):
                     
         rhom0  = omega_m * nnero.CST_MSOL_MPC.rho_c_over_h2        
         k_max = 1.1 * self.c * (3*min_mh/(4*np.pi)/rhom0)**(-1/3)
+
+        #print("We entrer here and return ", np.min([k_max / h, self.kmax]))
 
         # one should (almost) never need self.kmax if large enough
         # set here as a security to do not make CLASS take to much
@@ -117,13 +121,35 @@ class UVLuminosity(Likelihood):
         f_star10   = 10**(data.mcmc_parameters['log10_f_star10']['current']*data.mcmc_parameters['log10_f_star10']['scale'])
         m_turn     = 10**(data.mcmc_parameters['log10_m_turn']['current']*data.mcmc_parameters['log10_m_turn']['scale'])
      
-        # get values from CLASS
-        h       = cosmo.h()
-        omega_m = cosmo.Omega_m() * (h**2)
-        omega_b = cosmo.omega_b()
 
-        k     = np.logspace(-5, np.log10(cosmo.pars['P_k_max_h/Mpc'] * h), 50000)
-        pk    = np.array([cosmo.pk_lin(_k, 0) for _k in k])
+        # The UV luminosity functions are derived for a fixed cosmology
+        uv_cosmo = classy.Class()
+        uv_arguments = deepcopy(data.cosmo_arguments)
+        
+        # For the UV luminosity function we must ensure that omega_dm = 0.3, h = 0.7
+        # therefore we remove the omega_dm part inside
+        uv_arguments['h'] = 0.7
+        uv_arguments['omega_m'] = 0.3 * (0.7**2)
+        del uv_arguments['omega_cdm']
+
+        #print("UV arguments CLASS:", uv_arguments)
+        #print("Original arguments:", data.cosmo_arguments)
+        uv_cosmo.set(uv_arguments)
+
+        # This makes the code much longer 
+        # but at least we are consistent
+        # with the data
+        uv_cosmo.compute()
+
+        # get values from CLASS
+        h       = 0.7
+        omega_m = 0.3 * (0.7**2)
+        omega_b = uv_cosmo.omega_b()
+
+        #print("omega_m, h = ", omega_m, h, omega_b)
+
+        k     = np.logspace(-5, np.log10(uv_cosmo.pars['P_k_max_h/Mpc'] * h), 50000)
+        pk    = np.array([uv_cosmo.pk_lin(_k, 0) for _k in k])
 
         log_lkl = 0
 
@@ -135,7 +161,7 @@ class UVLuminosity(Likelihood):
             # loop on the redshift bins
             for iz, z, in enumerate(self.z_uv_exp[j]):
 
-                hz = cosmo.Hubble(z) * 1e-3 * nnero.CST_EV_M_S_K.c_light * nnero.CONVERSIONS.km_to_mpc / h
+                hz = uv_cosmo.Hubble(z) * 1e-3 * nnero.CST_EV_M_S_K.c_light * nnero.CONVERSIONS.km_to_mpc / h
                 mh = nnero.astrophysics.m_halo(hz, self.m_uv_exp[j][iz], alpha_star, t_star, f_star10, omega_b, omega_m)
                 
                 try:

@@ -848,12 +848,13 @@ class Data(object):
         if self.options.get('recompute_k_max', 'false') == 'true':
             k_max = self.cosmo_arguments.get('P_k_max_h/Mpc', 1.0)
             # check for the method get_k_max(data) for every likelihood
-            for lkl in self.lkl:
+            for _, lkl in self.lkl.items():
                 try:
                     new_k_max = lkl.get_k_max(self)
                     # update the k_max
                     k_max = np.max([k_max, new_k_max])
-                except: pass
+                except Exception as e: 
+                    pass
             # update the cosmo arguments
             self.cosmo_arguments['P_k_max_h/Mpc'] = k_max
 
@@ -1514,100 +1515,107 @@ class Data(object):
         #############################################
         # Computing reionization
 
-        if 'log10_f_star10' not in self.mcmc_parameters:
-            raise io_mp.ConfigurationError("input_config as astro needs log10_f_star10 as input parameter")
-        if 'alpha_star' not in self.mcmc_parameters:
-            raise io_mp.ConfigurationError("input_config as astro needs alpha_star as input parameter")
-        if 'log10_f_esc10' not in self.mcmc_parameters:
-            raise io_mp.ConfigurationError("input_config as astro needs log10_f_esc10 as input parameter")
-        if 'alpha_esc' not in self.mcmc_parameters:
-            raise io_mp.ConfigurationError("input_config as astro needs alpha_esc as input parameter")
-        if 't_star' not in self.mcmc_parameters:
-            raise io_mp.ConfigurationError("input_config as astro needs t_star as input parameter")
-        if 'log10_m_turn' not in self.mcmc_parameters:
-            raise io_mp.ConfigurationError("input_config as astro needs log10_m_turn as input parameter")
-        if 'log10_lum_X' not in self.mcmc_parameters:
-            raise io_mp.ConfigurationError("input_config as astro needs log10_lum_X as input parameter")
-        if 'nu_X_thresh' not in self.mcmc_parameters:
-            raise io_mp.ConfigurationError("input_config as astro needs nu_X_thresh as input parameter")
+        # by default here we compute the reionization history consistently
+        if self.options.get('reio', 'none') in ['none', 'custom']:
 
-        # call the regressor to obtain the reionization
-        xHII = nnero.predict_xHII(self.xHII_classifier, self.xHII_regressor,
-                                  Ombh2 = omega_b,
-                                  Omch2 = omega_dm, # in NNERO Omch2 is currently omega_dm
-                                  hlittle = self.cosmo_arguments['h'],
-                                  Ln_1010_As = self.cosmo_arguments['ln10^{10}A_s'],
-                                  POWER_INDEX = self.cosmo_arguments['n_s'],
-                                  INVERSE_M_WDM = 1.0/m_wdm*1e+3 if (n_wdm > 0) else 0.0, # given in keV in nnero
-                                  FRAC_WDM = f_wdm,
-                                  NEUTRINO_MASS_1 = m_nu1, 
-                                  F_STAR10 = self.astro_arguments['log10_f_star10'],
-                                  ALPHA_STAR = self.astro_arguments['alpha_star'], 
-                                  F_ESC10 = self.astro_arguments['log10_f_esc10'],
-                                  ALPHA_ESC = self.astro_arguments['alpha_esc'],
-                                  t_STAR = self.astro_arguments['t_star'],
-                                  M_TURN = self.astro_arguments['log10_m_turn'],
-                                  L_X = self.astro_arguments['log10_lum_X'],
-                                  NU_X_THRESH = self.astro_arguments['nu_X_thresh'],)
-        
-        
-        # redshifts corresponding to the value of xHII above
-        z = self.xHII_regressor.metadata.z
+            if 'log10_f_star10' not in self.mcmc_parameters:
+                raise io_mp.ConfigurationError("input_config as astro needs log10_f_star10 as input parameter")
+            if 'alpha_star' not in self.mcmc_parameters:
+                raise io_mp.ConfigurationError("input_config as astro needs alpha_star as input parameter")
+            if 'log10_f_esc10' not in self.mcmc_parameters:
+                raise io_mp.ConfigurationError("input_config as astro needs log10_f_esc10 as input parameter")
+            if 'alpha_esc' not in self.mcmc_parameters:
+                raise io_mp.ConfigurationError("input_config as astro needs alpha_esc as input parameter")
+            if 't_star' not in self.mcmc_parameters:
+                raise io_mp.ConfigurationError("input_config as astro needs t_star as input parameter")
+            if 'log10_m_turn' not in self.mcmc_parameters:
+                raise io_mp.ConfigurationError("input_config as astro needs log10_m_turn as input parameter")
+            if 'log10_lum_X' not in self.mcmc_parameters:
+                raise io_mp.ConfigurationError("input_config as astro needs log10_lum_X as input parameter")
+            if 'nu_X_thresh' not in self.mcmc_parameters:
+                raise io_mp.ConfigurationError("input_config as astro needs nu_X_thresh as input parameter")
 
-        # complete reionization history down to z = 0
-        z_full = np.linspace(0, z[0], 11)
-        x_full = np.ones(len(z_full))
-        z_full = np.concatenate((z_full[:-1], z))
-
-        # take into account the times when the predictor outputs False
-        if xHII is not False:
-            x_full = np.concatenate((x_full[:-1], xHII))
-        else:
-            x_full = -np.ones(len(z_full))
-
-        # convert from xHII in our convention to xe in CLASS convention (factor nb/nH)
-        # ATTENTION need to fix YHe to the value of NNERO
-        x_full = x_full / (1.0 - nnero.constants.CST_NO_DIM.YHe/4.0)
-    
-        # class conventions to account for Helium reionization
-        # in the free electron fraction
-        x_full[x_full == 1] = -1
-        x_full[z_full < 3]  = -2
-        x_full[-1] = 0.0
-
-
-        def format_with_significant_digits(array, sig_digits):
-            formatted_elements = []
+            # call the regressor to obtain the reionization
+            xHII = nnero.predict_xHII(self.xHII_classifier, self.xHII_regressor,
+                                    Ombh2 = omega_b,
+                                    Omch2 = omega_dm, # in NNERO Omch2 is currently omega_dm
+                                    hlittle = self.cosmo_arguments['h'],
+                                    Ln_1010_As = self.cosmo_arguments['ln10^{10}A_s'],
+                                    POWER_INDEX = self.cosmo_arguments['n_s'],
+                                    INVERSE_M_WDM = 1.0/m_wdm*1e+3 if (n_wdm > 0) else 0.0, # given in keV in nnero
+                                    FRAC_WDM = f_wdm,
+                                    NEUTRINO_MASS_1 = m_nu1, 
+                                    F_STAR10 = self.astro_arguments['log10_f_star10'],
+                                    ALPHA_STAR = self.astro_arguments['alpha_star'], 
+                                    F_ESC10 = self.astro_arguments['log10_f_esc10'],
+                                    ALPHA_ESC = self.astro_arguments['alpha_esc'],
+                                    t_STAR = self.astro_arguments['t_star'],
+                                    M_TURN = self.astro_arguments['log10_m_turn'],
+                                    L_X = self.astro_arguments['log10_lum_X'],
+                                    NU_X_THRESH = self.astro_arguments['nu_X_thresh'],)
             
-            for num in array:
-                if num == 0:
-                    formatted_elements.append(f"{0:.{sig_digits-1}f}")
-                else:
-                    # Calculate the number of decimal places needed for the given significant digits
-                    decimal_places = sig_digits - int(np.floor(np.log10(abs(num)))) - 1
-                    
-                    # If decimal_places is negative (for large numbers), just round to the nearest integer
-                    if decimal_places < 0:
-                        formatted_elements.append(f"{round(num, decimal_places):.0f}")
+            
+            # redshifts corresponding to the value of xHII above
+            z = self.xHII_regressor.metadata.z
+
+            # complete reionization history down to z = 0
+            z_full = np.linspace(0, z[0], 11)
+            x_full = np.ones(len(z_full))
+            z_full = np.concatenate((z_full[:-1], z))
+
+            # take into account the times when the predictor outputs False
+            if xHII is not False:
+                x_full = np.concatenate((x_full[:-1], xHII))
+            else:
+                x_full = -np.ones(len(z_full))
+
+            # convert from xHII in our convention to xe in CLASS convention (factor nb/nH)
+            # ATTENTION need to fix YHe to the value of NNERO
+            x_full = x_full / (1.0 - nnero.constants.CST_NO_DIM.YHe/4.0)
+        
+            # class conventions to account for Helium reionization
+            # in the free electron fraction
+            x_full[x_full == 1] = -1
+            x_full[z_full < 3]  = -2
+            x_full[-1] = 0.0
+
+
+            def format_with_significant_digits(array, sig_digits):
+                formatted_elements = []
+                
+                for num in array:
+                    if num == 0:
+                        formatted_elements.append(f"{0:.{sig_digits-1}f}")
                     else:
-                        formatted_elements.append(f"{num:.{decimal_places}f}")
+                        # Calculate the number of decimal places needed for the given significant digits
+                        decimal_places = sig_digits - int(np.floor(np.log10(abs(num)))) - 1
+                        
+                        # If decimal_places is negative (for large numbers), just round to the nearest integer
+                        if decimal_places < 0:
+                            formatted_elements.append(f"{round(num, decimal_places):.0f}")
+                        else:
+                            formatted_elements.append(f"{num:.{decimal_places}f}")
+                
+                res = "[" + ", ".join(formatted_elements) + "]"
+                res = res.strip(']').strip('[').replace(" ", "")
+                return res
             
-            res = "[" + ", ".join(formatted_elements) + "]"
-            res = res.strip(']').strip('[').replace(" ", "")
-            return res
-        
 
-        # pass the argument to class
-        # set the input parameter to interpolation
-        self.cosmo_arguments['reio_parametrization'] = 'reio_inter'
-        self.cosmo_arguments['reio_inter_num']       = len(z_full)
-        self.cosmo_arguments['reio_inter_z']         = format_with_significant_digits(z_full, 3)
+            # pass the argument to class
+            # set the input parameter to interpolation
+            self.cosmo_arguments['reio_parametrization'] = 'reio_inter'
+            self.cosmo_arguments['reio_inter_num']       = len(z_full)
+            self.cosmo_arguments['reio_inter_z']         = format_with_significant_digits(z_full, 3)
+            
+            if xHII is not False:
+                self.cosmo_arguments['reio_inter_xe']  = format_with_significant_digits(x_full, 3)
+            else:
+                self.cosmo_arguments['reio_inter_xe'] = -1
         
-        if xHII is not False:
-            self.cosmo_arguments['reio_inter_xe']  = format_with_significant_digits(x_full, 3)
         else:
-            self.cosmo_arguments['reio_inter_xe'] = -1
-
+            # nothing to do here for now, but in the future, could use this slot
+            # to check different reionization histories from differents inputs
+            pass
         
         # check for MPI
         try:
