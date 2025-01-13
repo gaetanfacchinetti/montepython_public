@@ -82,14 +82,14 @@ class UVLuminosity(Likelihood):
             for iz, z, in enumerate(self.z_uv_exp[j]):
 
                 hz = 100 * nnero.cosmology.h_factor_no_rad(z, omega_b, omega_m - omega_b, h)[0, 0] * nnero.CONVERSIONS.km_to_mpc # approximation of the hubble factor
-                mh = nnero.astrophysics.m_halo(hz, self.m_uv_exp[j][iz], alpha_star, t_star, f_star10, omega_b, omega_m)[0, 0]
+                mh, _ = nnero.astrophysics.m_halo(hz, self.m_uv_exp[j][iz], alpha_star, t_star, f_star10, omega_b, omega_m)[0, 0]
 
                 # set the min of mh
                 if np.min(mh) < min_mh:
                     min_mh = np.min(mh)
                     
         rhom0  = omega_m * nnero.CST_MSOL_MPC.rho_c_over_h2        
-        k_max = 1.1 * self.c * (3*min_mh/(4*np.pi)/rhom0)**(-1/3)
+        k_max = 1.3 * self.c * (3*min_mh/(4*np.pi)/rhom0)**(-1/3)
 
         #print("We entrer here and return ", np.min([k_max / h, self.kmax]))
 
@@ -139,7 +139,11 @@ class UVLuminosity(Likelihood):
         # This makes the code much longer 
         # but at least we are consistent
         # with the data
-        uv_cosmo.compute()
+        try:
+            uv_cosmo.compute()
+        except Exception as e :
+            print("A problem appears in the execution of CLASS for the following parameters :", uv_arguments)
+            raise e
 
         # get values from CLASS
         h       = 0.7
@@ -162,13 +166,13 @@ class UVLuminosity(Likelihood):
             for iz, z, in enumerate(self.z_uv_exp[j]):
 
                 hz = uv_cosmo.Hubble(z) * 1e-3 * nnero.CST_EV_M_S_K.c_light * nnero.CONVERSIONS.km_to_mpc / h
-                mh = nnero.astrophysics.m_halo(hz, self.m_uv_exp[j][iz], alpha_star, t_star, f_star10, omega_b, omega_m)
+                mh, mask = nnero.astrophysics.m_halo(hz, self.m_uv_exp[j][iz], alpha_star, t_star, f_star10, omega_b, omega_m)
                 
                 try:
                     # predict the UV luminosity function on the range of magnitude m_uv at that redshift bin
                     # in the future, could add sheth_a, sheth_q, sheth_p and c as nuisance parameters
                     phi_uv_pred_z = nnero.phi_uv(z, hz, self.m_uv_exp[j][iz], k, pk, alpha_star, t_star, f_star10, m_turn, omega_b, omega_m, h, 
-                                                 self.sheth_a, self.sheth_q, self.sheth_p, window = self.window, c = self.c, mh = mh)[0,0]
+                                                 self.sheth_a, self.sheth_q, self.sheth_p, window = self.window, c = self.c, mh = mh, mask = mask)[0,0]
                 
                 except nnero.ShortPowerSpectrumRange:
                     # kill the log likelihood in that case by setting it to -infinity

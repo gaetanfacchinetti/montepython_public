@@ -728,7 +728,7 @@ def compute_lkl(cosmo, data):
             data.cosmo_arguments.update({'output': ''})
 
         if data.cosmo_arguments.get('reio_parametrization', 'none') == 'reio_inter' :
-            if data.cosmo_arguments['reio_inter_xe'] == -1:
+            if data.cosmo_arguments['reio_inter_xe'] == -100:
                 return data.boundary_loglike
 
         if 'SZ' in data.cosmo_arguments['output']:

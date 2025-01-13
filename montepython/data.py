@@ -1538,7 +1538,7 @@ class Data(object):
             # call the regressor to obtain the reionization
             xHII = nnero.predict_xHII(self.xHII_classifier, self.xHII_regressor,
                                     Ombh2 = omega_b,
-                                    Omch2 = omega_dm, # in NNERO Omch2 is currently omega_dm
+                                    Omdmh2 = omega_dm, # in NNERO Omch2 is currently omega_dm
                                     hlittle = self.cosmo_arguments['h'],
                                     Ln_1010_As = self.cosmo_arguments['ln10^{10}A_s'],
                                     POWER_INDEX = self.cosmo_arguments['n_s'],
@@ -1610,7 +1610,7 @@ class Data(object):
             if xHII is not False:
                 self.cosmo_arguments['reio_inter_xe']  = format_with_significant_digits(x_full, 3)
             else:
-                self.cosmo_arguments['reio_inter_xe'] = -1
+                self.cosmo_arguments['reio_inter_xe'] = -100
         
         else:
             # nothing to do here for now, but in the future, could use this slot

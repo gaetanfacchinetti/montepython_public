@@ -1,0 +1,1 @@
+mpirun -np 12 montepython/MontePython.py run --conf default.conf -p input/base2018TTTEEE_reio_UV_WDM.param -N 1 -o chains/wdm_reio_uv -f 1.0 -c chains/mnu_reio_uv_fix/mnu_reio_uv_fix.covmat
