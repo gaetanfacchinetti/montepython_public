@@ -165,7 +165,7 @@ class UVLuminosity(Likelihood):
             # loop on the redshift bins
             for iz, z, in enumerate(self.z_uv_exp[j]):
 
-                hz = uv_cosmo.Hubble(z) * 1e-3 * nnero.CST_EV_M_S_K.c_light * nnero.CONVERSIONS.km_to_mpc / h
+                hz = uv_cosmo.Hubble(z) * 1e-3 * nnero.CST_EV_M_S_K.c_light * nnero.CONVERSIONS.km_to_mpc
                 mh, mask = nnero.astrophysics.m_halo(hz, self.m_uv_exp[j][iz], alpha_star, t_star, f_star10, omega_b, omega_m)
                 
                 try:
@@ -176,13 +176,15 @@ class UVLuminosity(Likelihood):
                 
                 except nnero.ShortPowerSpectrumRange:
                     # kill the log likelihood in that case by setting it to -infinity
-                    return -np.inf
+                    #return -np.inf
+                    raise ValueError('k_max must be too small')
 
                 # get a sigma that is either the down or the up one depending 
                 # if prediction is lower / higher than the observed value
                 mask = (phi_uv_pred_z > self.phi_uv_exp[j][iz])
-                sigma = self.sigma_phi_uv_down[j][iz]
-                sigma[mask] = self.sigma_phi_uv_up[j][iz][mask]
+                sigma        = np.zeros_like(self.sigma_phi_uv_down[j][iz])
+                sigma[~mask] = self.sigma_phi_uv_down[j][iz][~mask]
+                sigma[mask]  = self.sigma_phi_uv_up[j][iz][mask]
 
                 # update the log likelihood
                 log_lkl = log_lkl + np.sum(np.log(np.sqrt(2.0/np.pi)/(self.sigma_phi_uv_up[j][iz] + self.sigma_phi_uv_down[j][iz])) - (phi_uv_pred_z - self.phi_uv_exp[j][iz])**2/(2*(sigma**2)))
