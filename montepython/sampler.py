@@ -704,7 +704,7 @@ def compute_lkl(cosmo, data):
     if ((data.need_cosmo_update) or
             (not cosmo.state) or
             (data.jumping_factor == 0)):
-
+        
         # Prepare the cosmological module with the new set of parameters
         # print("The cosmo arguments are:", data.cosmo_arguments)
         cosmo.set(data.cosmo_arguments)
@@ -768,6 +768,7 @@ def compute_lkl(cosmo, data):
                 raise io_mp.CosmologicalModuleError(
                     "You interrupted execution")
 
+    
     # For each desired likelihood, compute its value against the theoretical
     # model
     loglike = 0

@@ -97,12 +97,36 @@ def log_cosmo_arguments(data, command_line):
     previously initialized data.
 
     """
-    dataset = (data.cosmo_arguments | data.astro_arguments)
+    dataset = data.cosmo_arguments
 
     if len(dataset) >= 1:
         log = open(os.path.join(command_line.folder, 'log.param'), 'a')
         log.write('\n\n#-----------Cosmological-arguments---------\n')
         log.write('data.cosmo_arguments.update({0})\n'.format(
+            dataset))
+        log.close()
+
+
+
+def log_astro_arguments(data, command_line):
+    """
+    Write down the `cosmo_arguments` used to log.param
+
+    Third function called when writing log.param. It is understood here that
+    all the other parameters for the cosmological modules are set to their
+    default value directly in the program.
+
+    It is written as an update for the dictionary cosmo_arguments (i.e. as
+    :code:`dict.update()` and not as :code:`dict =`) in order not to erase
+    previously initialized data.
+
+    """
+    dataset = data.astro_arguments
+
+    if len(dataset) >= 1:
+        log = open(os.path.join(command_line.folder, 'log.param'), 'a')
+        log.write('\n\n#-----------Astrophysical-arguments---------\n')
+        log.write('data.astro_arguments.update({0})\n'.format(
             dataset))
         log.close()
 

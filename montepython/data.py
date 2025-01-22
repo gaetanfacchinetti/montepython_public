@@ -381,6 +381,7 @@ class Data(object):
         # it can be modified inside the likelihoods init functions
         if self.log_flag:
             io_mp.log_cosmo_arguments(self, command_line)
+            io_mp.log_astro_arguments(self, command_line)
             io_mp.log_default_configuration(self, command_line)
 
         # Log plotting parameter names file for compatibility with GetDist
@@ -765,29 +766,43 @@ class Data(object):
         """
         parameter_names = self.get_mcmc_parameters(['varying'])
         cosmo_names = self.get_mcmc_parameters(['cosmo'])
+        astro_names = self.get_mcmc_parameters(['astro'])
 
-        need_change = 0
+        need_change_cosmo = 0
+        need_change_astro = 0
 
         # For all elements in the varying parameters:
         for elem in parameter_names:
             i = parameter_names.index(elem)
-            # If it is a cosmological parameter
+            
+            # If it is a cosmological or astro parameter
             if elem in cosmo_names:
                 if self.mcmc_parameters[elem]['current'] != new_step[i]:
-                    need_change += 1
+                    need_change_cosmo += 1
+
+            if elem in astro_names:
+                if self.mcmc_parameters[elem]['current'] != new_step[i]:
+                    need_change_astro += 1
 
         # If any cosmological value was changed,
-        if need_change > 0:
+        if need_change_cosmo > 0:
             self.need_cosmo_update = True
         else:
             self.need_cosmo_update = False
 
+        if need_change_astro > 0:
+            need_astro_update = True
+        else:
+            need_astro_update = False
+
+
         for likelihood in dictvalues(self.lkl):
             # If the cosmology changed, you need to recompute the likelihood
             # anyway
-            if self.need_cosmo_update:
+            if self.need_cosmo_update or need_astro_update:
                 likelihood.need_update = True
                 continue
+
             # Otherwise, check if the nuisance parameters of this likelihood
             # were changed
             need_change = 0
@@ -853,7 +868,7 @@ class Data(object):
                     new_k_max = lkl.get_k_max(self)
                     # update the k_max
                     k_max = np.max([k_max, new_k_max])
-                except Exception as e: 
+                except AttributeError: 
                     pass
             # update the cosmo arguments
             self.cosmo_arguments['P_k_max_h/Mpc'] = k_max
@@ -1324,23 +1339,29 @@ class Data(object):
         module which is called in this function.
         """
 
-        if 'omega_dm' not in self.mcmc_parameters:
-            raise io_mp.ConfigurationError("input_config as astro needs omega_dm as input parameter")
-        if 'omega_b' not in self.mcmc_parameters:
+        if 'omega_b' not in self.cosmo_arguments:
             raise io_mp.ConfigurationError("input_config as astro needs omega_b as input parameter")
-        if 'h' not in self.mcmc_parameters:
+        if 'h' not in self.cosmo_arguments:
             raise io_mp.ConfigurationError("input_config as astro needs h as input parameter")
 
-        omega_dm  = self.cosmo_arguments['omega_dm']
         omega_b   = self.cosmo_arguments['omega_b']
+
+        if 'omega_dm' not in self.cosmo_arguments:
+            if 'omega_m' not in self.cosmo_arguments:
+                raise io_mp.ConfigurationError("input_config as astro needs omega_dm as input parameter")
+            else:
+                omega_dm = self.cosmo_arguments['omega_m'] - omega_b
+        else:
+            omega_dm  = self.cosmo_arguments['omega_dm']
+            del self.cosmo_arguments['omega_dm']
+
 
         # first define omega_cdm in as the total omega_dm
         # then the warm and hot components will be removed below
-        omega_cdm = omega_dm
-
         # omega_dm is not passed to class in the end
         # will be replaced by omega_cdm and f_wdm
-        del self.cosmo_arguments['omega_dm']
+        omega_cdm = omega_dm
+   
 
         ###########
         ## DEFINE NEUTRINO MASSES BEFORE ANYTHING ELSE
@@ -1401,7 +1422,7 @@ class Data(object):
         ## MASSIVE NEUTRINOS
 
         nu_fluid_approx = self.cosmo_arguments.get('nu_fluid_approx', 2)
-        if 'nu_fluid_approx' in self.mcmc_parameters:
+        if 'nu_fluid_approx' in self.cosmo_arguments:
             del self.cosmo_arguments['nu_fluid_approx']
 
         # for massive neutrinos we set the parameters here
@@ -1435,7 +1456,7 @@ class Data(object):
         ## WARM DARK MATTER
         
         wdm_fluid_approx = self.cosmo_arguments.get('wdm_fluid_approx', 2)
-        if 'wdm_fluid_approx' in self.mcmc_parameters:
+        if 'wdm_fluid_approx' in self.cosmo_arguments:
             del self.cosmo_arguments['wdm_fluid_approx']
 
         # assign a variable for the fraction of warm dark matter 
@@ -1504,7 +1525,6 @@ class Data(object):
         fluid_approx_str = ",".join(map(str, fluid_approx))
 
         # set m_ncdm_, N_ur and N_ncdm according to what is computed above
-        self.cosmo_arguments['omega_cdm'] = omega_cdm
         self.cosmo_arguments['m_ncdm']    = m_ncdm_str
         self.cosmo_arguments['N_ur']      = n_ur
         self.cosmo_arguments['deg_ncdm']  = deg_ncdm_str
@@ -1512,27 +1532,30 @@ class Data(object):
         self.cosmo_arguments['T_ncdm']    = T_ncdm_str
         self.cosmo_arguments['ncdm_fluid_approximation'] = fluid_approx_str
 
+        if 'omega_m' not in self.cosmo_arguments:
+            self.cosmo_arguments['omega_cdm'] = omega_cdm
+
         #############################################
         # Computing reionization
 
         # by default here we compute the reionization history consistently
         if self.options.get('reio', 'none') in ['none', 'custom']:
 
-            if 'log10_f_star10' not in self.mcmc_parameters:
+            if 'log10_f_star10' not in self.astro_arguments:
                 raise io_mp.ConfigurationError("input_config as astro needs log10_f_star10 as input parameter")
-            if 'alpha_star' not in self.mcmc_parameters:
+            if 'alpha_star' not in self.astro_arguments:
                 raise io_mp.ConfigurationError("input_config as astro needs alpha_star as input parameter")
-            if 'log10_f_esc10' not in self.mcmc_parameters:
+            if 'log10_f_esc10' not in self.astro_arguments:
                 raise io_mp.ConfigurationError("input_config as astro needs log10_f_esc10 as input parameter")
-            if 'alpha_esc' not in self.mcmc_parameters:
+            if 'alpha_esc' not in self.astro_arguments:
                 raise io_mp.ConfigurationError("input_config as astro needs alpha_esc as input parameter")
-            if 't_star' not in self.mcmc_parameters:
+            if 't_star' not in self.astro_arguments:
                 raise io_mp.ConfigurationError("input_config as astro needs t_star as input parameter")
-            if 'log10_m_turn' not in self.mcmc_parameters:
+            if 'log10_m_turn' not in self.astro_arguments:
                 raise io_mp.ConfigurationError("input_config as astro needs log10_m_turn as input parameter")
-            if 'log10_lum_X' not in self.mcmc_parameters:
+            if 'log10_lum_X' not in self.astro_arguments:
                 raise io_mp.ConfigurationError("input_config as astro needs log10_lum_X as input parameter")
-            if 'nu_X_thresh' not in self.mcmc_parameters:
+            if 'nu_X_thresh' not in self.astro_arguments:
                 raise io_mp.ConfigurationError("input_config as astro needs nu_X_thresh as input parameter")
 
             # call the regressor to obtain the reionization
@@ -1571,7 +1594,13 @@ class Data(object):
 
             # convert from xHII in our convention to xe in CLASS convention (factor nb/nH)
             # ATTENTION need to fix YHe to the value of NNERO
-            x_full = x_full / (1.0 - nnero.constants.CST_NO_DIM.YHe/4.0)
+
+            YHe = nnero.constants.CST_NO_DIM.YHe
+            mHe = nnero.constants.CST_EV_M_S_K.mass_helium
+            mH  = nnero.constants.CST_EV_M_S_K.mass_hydrogen
+            fHe = YHe/(1.0-YHe)*mH/mHe
+
+            x_full = x_full * (1.0 + fHe)
         
             # class conventions to account for Helium reionization
             # in the free electron fraction

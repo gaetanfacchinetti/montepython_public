@@ -35,7 +35,12 @@ class Reionization(Likelihood):
         if nnero.constants.CST_NO_DIM.YHe != cosmo.get_current_derived_parameters(['YHe'])['YHe']:
             raise ValueError("If Reionization used, need to fix the value of YHe to that defined in NNERO")
         
-        xHII = xe * (1.0-nnero.constants.CST_NO_DIM.YHe/4.0)
+        YHe = nnero.constants.CST_NO_DIM.YHe
+        mHe = nnero.constants.CST_EV_M_S_K.mass_helium
+        mH  = nnero.constants.CST_EV_M_S_K.mass_hydrogen
+        fHe = YHe/(1.0-YHe)*mH/mHe
+
+        xHII = xe / (1.0+fHe)
 
 
         # initialise the result

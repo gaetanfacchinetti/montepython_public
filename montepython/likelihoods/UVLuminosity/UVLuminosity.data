@@ -9,6 +9,7 @@ UVLuminosity.data_directory = os.path.join(data.path['data'], 'UVLuminosity/')
 
 # maximum values of k (here in units of h/Mpc)
 UVLuminosity.kmax = 10000
+UVLuminosity.astro_only_kmax = 100
 
 # halo mass function parameters
 # could be included as nuisance parameters in a future version
@@ -20,4 +21,3 @@ UVLuminosity.window  = 'sharpk'
 # radius to mass conversion factor
 UVLuminosity.c = 2.5
 
-UVLuminosity.use_nuisance = []

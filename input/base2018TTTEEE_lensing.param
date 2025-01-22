@@ -33,12 +33,17 @@ data.over_sampling=[1, 5]
 
 # Cosmological parameters list
 
-data.parameters['omega_b']      = [  2.2377,   None, None,      0.015, 0.01, 'cosmo']
-data.parameters['omega_cdm']    = [ 0.12010,   None, None,     0.0013,    1, 'cosmo']
-data.parameters['100*theta_s']  = [ 1.04110,   None, None,    0.00030,    1, 'cosmo']
-data.parameters['ln10^{10}A_s'] = [  3.0447,   None, None,      0.015,    1, 'cosmo']
-data.parameters['n_s']          = [  0.9659,   None, None,     0.0042,    1, 'cosmo']
-data.parameters['tau_reio']     = [  0.0543,  0.004, None,      0.008,    1, 'cosmo']
+data.parameters['omega_b']         = [ 2.236,  2.13,  2.35,  0.015,  0.01,  'cosmo' ]
+data.parameters['omega_dm']        = [ 0.119,  0.1,   0.14,  0.0015, 1,     'cosmo' ]
+data.parameters['h']               = [ 0.67,   0.6,   0.75,  0.0065, 1,     'cosmo' ]
+data.parameters['ln10^{10}A_s']    = [ 3.0447, 2.98,  3.1,   0.015,  1,     'cosmo' ]
+data.parameters['n_s']             = [ 0.9659, 0.94,  0.985, 0.0042, 1,     'cosmo' ]
+data.parameters['tau_reio']        = [ 0.0543, 0.004, None,  0.008,  1,     'cosmo' ]
+
+data.options['nu_hierarchy']    = 'normal'
+data.options['input_config']    = 'astro'
+data.options['recompute_k_max'] = 'false'
+data.options['reio']            = 'tanh'
 
 # Nuisance parameter list, same call, except the name does not have to be a class name
 
@@ -106,16 +111,13 @@ data.cosmo_arguments['sBBN file'] = data.path['cosmo']+'/external/bbn/sBBN.dat'
 # You can force the code to use the exact BBN file passed above with flag
 #data.custom_bbn_file = True
 
+data.cosmo_arguments['YHe']     = 0.245
 data.cosmo_arguments['k_pivot'] = 0.05
+data.cosmo_arguments['m_nu1']   = 0.0
+data.cosmo_arguments['1/m_wdm'] = 0.0
+data.cosmo_arguments['f_wdm']   = 0.0
 
-# The base model features two massless
-# and one massive neutrino with m=0.06eV.
-# The settings below ensures that Neff=3.046
-# and m/omega = 93.14 eV
-data.cosmo_arguments['N_ur'] = 2.0328
-data.cosmo_arguments['N_ncdm'] = 1
-data.cosmo_arguments['m_ncdm'] = 0.06
-data.cosmo_arguments['T_ncdm'] = 0.71611
+data.cosmo_arguments['nu_fluid_approx']  = 2
 
 # These two are required to get sigma8 as a derived parameter
 # (class must compute the P(k) until sufficient k)
